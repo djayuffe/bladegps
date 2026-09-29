@@ -1,9 +1,59 @@
 # bladeGPS
 
-Very crude experimental implimentation of [gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim) for real-time signal generation.
-The code works with bladeRF and has been tested on Windows only.
+Real-time GPS L1 C/A signal generation for bladeRF, based on the GPS signal model from [gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim). bladeGPS reads broadcast ephemeris data and a static or dynamic receiver path, generates synthetic GPS baseband I/Q samples, and streams them directly to a Nuand bladeRF transmitter.
 
+This is research and lab software. Only transmit GPS-like RF signals inside a properly shielded test setup, with appropriate attenuation, and only where you are legally allowed to do so.
+
+## Features
+
+- GPS L1 C/A baseband generation with up to 16 simulated channels.
+- Static receiver mode using latitude, longitude, and height.
+- Dynamic receiver mode from CSV ECEF user motion files.
+- Dynamic receiver mode from NMEA GGA streams.
+- Optional keyboard-controlled interactive motion mode.
+- RINEX broadcast navigation file parsing.
+- Real-time SC16 I/Q streaming to bladeRF.
+- Optional XB200 setup for GPS-band transmit filtering/path selection.
+- Portable Makefile that uses `pkg-config libbladeRF` when available, with the original adjacent bladeRF source-tree fallback.
+
+## Requirements
+
+- C compiler with C99-compatible libc behavior.
+- POSIX threads.
+- libbladeRF headers and library.
+- A bladeRF device supported by libbladeRF.
+- `pkg-config` is recommended so the Makefile can discover libbladeRF automatically.
+
+On macOS with MacPorts, for example, the build can use libbladeRF from `/opt/local` through `pkg-config`. On Linux, install libbladeRF development files through your package manager or build them from Nuand's source tree.
+
+## Build
+
+```sh
+make
 ```
+
+If libbladeRF is not discoverable through `pkg-config`, the Makefile falls back to the historical layout:
+
+```text
+../bladeRF/host/libraries/libbladeRF/include
+../bladeRF/host/build/output
+```
+
+You can also pass flags explicitly:
+
+```sh
+make BLADERF_CFLAGS="-I/path/to/libbladeRF/include" BLADERF_LIBS="-L/path/to/lib -lbladeRF"
+```
+
+Clean build products:
+
+```sh
+make clean
+```
+
+## Usage
+
+```text
 Usage: bladegps [options]
 Options:
   -e <gps_nav>     RINEX navigation file for GPS ephemerides (required)
@@ -12,42 +62,60 @@ Options:
   -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100
   -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss
   -d <duration>    Duration [sec] (max: 86400)
-  -x <XB_number>   Enable XB board, e.g. '-x 200' for XB200
+  -x <XB number>   Enable XB board, e.g. '-x 200' for XB200
   -i               Interactive mode: North='w', South='s', East='d', West='a'
 ```
 
-### Additional include files and libraries
+Static location example:
 
-1. libbladeRF.h and bladeRF.lib (build from the [source](https://github.com/Nuand/bladeRF))
-2. pthread.h and pthreadVC2.lib (available from [sourceware.org/pthreads-win32](https://sourceware.org/pthreads-win32/))
-
-### Build on Linux (Untested)
-
-1. Retrive the bladeRF source in a directory next to the current directory.
-
- ```
-$ cd ..
-$ git clone git@github.com:Nuand/bladeRF.git
+```sh
+./bladegps -e brdc2940.18n -l 59.3293,18.0686,30 -d 60
 ```
 
-2. Build the bladeRF host library.
+User motion CSV example:
 
- ```
-$ cd bladeRF/host
-$ mkdir build
-$ cd build
-$ cmake ..
-$ make
+```sh
+./bladegps -e brdc2940.18n -u circle.csv -d 120
 ```
 
-3. Build bladeGPS.
+NMEA GGA example:
 
- ```
-$ cd ../../../bladeGPS
-$ make
+```sh
+./bladegps -e brdc2940.18n -g track.nmea -d 120
 ```
 
-### License
+XB200 example:
 
-Copyright &copy; 2015 Takuji Ebinuma  
-Distributed under the [MIT License](http://www.opensource.org/licenses/mit-license.php).
+```sh
+./bladegps -e brdc2940.18n -l 35.274,137.014,100 -x 200 -d 60
+```
+
+## Input files
+
+- `brdc*.??n` files are RINEX broadcast navigation files.
+- `circle.csv`, `satellite.csv`, and `ss520-4.csv` are sample motion/position data files.
+- `run_bladerfGPS.sh` is a convenience script retained from the original project.
+
+User motion CSV rows use:
+
+```text
+time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
+```
+
+## Implementation notes
+
+- The simulator generates 0.1 second blocks at 2.6 Msps for bladeRF SC16 transmission.
+- FIFO access between the GPS generation thread and TX thread is protected with the GPS mutex.
+- Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
+- Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
+- Malformed NMEA GGA lines are skipped instead of crashing the parser.
+
+## Safety
+
+This software can generate RF signals in protected satellite navigation bands. Never connect a bladeRF running this program to an antenna in an unshielded environment unless you have explicit legal authority. For receiver testing, use a shielded enclosure, direct cable injection, attenuation, and isolation appropriate for your equipment.
+
+## License
+
+Copyright (c) 2015 Takuji Ebinuma.
+
+Distributed under the MIT License. See [LICENSE](LICENSE).

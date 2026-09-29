@@ -6,7 +6,6 @@
 #include <math.h>
 
 #include <time.h>
-#include <omp.h>
 #ifdef _WIN32
 #include "getopt.h"
 #else
@@ -16,7 +15,11 @@
 #include "gpssim.h"
 #ifdef BLADE_GPS
 #include "bladegps.h"
+#ifdef _WIN32
 #include <conio.h>
+#else
+#include "getch.h"
+#endif
 #endif
 
 int sinTable512[] = {
@@ -1129,7 +1132,7 @@ int readUserMotion(double **xyz, const char *filename)
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
 
-		if (EOF==sscanf(str, "%lf,%lf,%lf,%lf", &t, &x, &y, &z)) // Read CSV line
+		if (sscanf(str, "%lf,%lf,%lf,%lf", &t, &x, &y, &z) != 4) // Read CSV line
 			break;
 
 		xyz[numd][0] = x;
@@ -1161,46 +1164,68 @@ int readNmeaGGA(double **xyz, const char *filename)
 			break;
 
 		token = strtok(str, ",");
+		if (token == NULL || strlen(token) < 6)
+			continue;
 
 		if (strncmp(token+3, "GGA", 3)==0)
 		{
 			token = strtok(NULL, ","); // Date and time
 			
 			token = strtok(NULL, ","); // Latitude
+			if (token == NULL || strlen(token) < 4)
+				continue;
 			strncpy(tmp, token, 2);
 			tmp[2] = 0;
 			
 			llh[0] = atof(tmp) + atof(token+2)/60.0;
 
 			token = strtok(NULL, ","); // North or south
+			if (token == NULL || token[0] == '\0')
+				continue;
 			if (token[0]=='S')
 				llh[0] *= -1.0;
 
 			llh[0] /= R2D; // in radian
 			
 			token = strtok(NULL, ","); // Longitude
+			if (token == NULL || strlen(token) < 5)
+				continue;
 			strncpy(tmp, token, 3);
 			tmp[3] = 0;
 			
 			llh[1] = atof(tmp) + atof(token+3)/60.0;
 
 			token = strtok(NULL, ","); // East or west
+			if (token == NULL || token[0] == '\0')
+				continue;
 			if (token[0]=='W')
 				llh[1] *= -1.0;
 
 			llh[1] /= R2D; // in radian
 
 			token = strtok(NULL, ","); // GPS fix
+			if (token == NULL)
+				continue;
 			token = strtok(NULL, ","); // Number of satellites
+			if (token == NULL)
+				continue;
 			token = strtok(NULL, ","); // HDOP
+			if (token == NULL)
+				continue;
 
 			token = strtok(NULL, ","); // Altitude above meas sea level
+			if (token == NULL || token[0] == '\0')
+				continue;
 			
 			llh[2] = atof(token);
 
 			token = strtok(NULL, ","); // in meter
+			if (token == NULL)
+				continue;
 
 			token = strtok(NULL, ","); // Geoid height above WGS84 ellipsoid
+			if (token == NULL || token[0] == '\0')
+				continue;
 			
 			llh[2] += atof(token);
 
@@ -1443,7 +1468,9 @@ void *gps_task(void *arg)
 	int ip,qp;
 	int iTable;
 	short *iq_buff = NULL;
+	#ifndef BLADE_GPS
 	signed char *iq8_buff = NULL;
+	#endif
 
 	gpstime_t grx;
 	double delt;
@@ -1461,7 +1488,9 @@ void *gps_task(void *arg)
 	char navfile[MAX_CHAR];
 
 	int iq_buff_size;
+	#ifndef BLADE_GPS
 	int data_format;
+	#endif
 
 	int gain[MAX_CHAN];
 	double path_loss;
@@ -1486,7 +1515,6 @@ void *gps_task(void *arg)
 	int result;
 #else
 	int interactive = FALSE;
-	int cnt = 0;
 	int key;
 	int key_direction;
 	int direction = UNDEF;
@@ -1612,7 +1640,6 @@ void *gps_task(void *arg)
 #else
 	strcpy(navfile, s->opt.navfile);
 	strcpy(umfile, s->opt.umfile);
-	data_format = SC16;
 	
 	staticLocationMode = s->opt.staticLocationMode;
 	llh[0] = s->opt.llh[0];
@@ -1640,7 +1667,7 @@ void *gps_task(void *arg)
 	////////////////////////////////////////////////////////////
 
 	// Allocate user motion array
-	xyz = (double **)malloc(USER_MOTION_SIZE * sizeof(double**));
+	xyz = (double **)malloc(USER_MOTION_SIZE * sizeof(*xyz));
 	
 	if (xyz==NULL)
 	{
@@ -1659,7 +1686,8 @@ void *gps_task(void *arg)
 		if (xyz[i]==NULL)
 		{
 			for (j=i-1; j>=0; j--)
-				free(xyz[i]);
+				free(xyz[j]);
+			free(xyz);
 
 			printf("ERROR: Faild to allocate user motion array.\n");
 #ifndef BLADE_GPS
@@ -1834,7 +1862,7 @@ void *gps_task(void *arg)
 	////////////////////////////////////////////////////////////
 
 	// Allocate I/Q buffer
-	iq_buff = calloc(2*iq_buff_size, 2);
+	iq_buff = calloc(2 * iq_buff_size, sizeof(*iq_buff));
 
 	if (iq_buff==NULL)
 	{
@@ -2022,6 +2050,10 @@ void *gps_task(void *arg)
 
 				// Receiver antenna gain
 				ibs = (int)((90.0-rho.azel[1]*R2D)/5.0); // covert elevation to boresight
+				if (ibs < 0)
+					ibs = 0;
+				else if (ibs > 36)
+					ibs = 36;
 				ant_gain = ant_pat[ibs];
 
 				// Signal gain
@@ -2122,6 +2154,7 @@ void *gps_task(void *arg)
 		// Write into FIFO
 		///////////////////////////////////////////////////////////
 
+		pthread_mutex_lock(&(s->gps.lock));
 		if (!s->gps.ready) {
 			// Initialization has been done. Ready to create TX task.
 			printf("GPS signal generator is ready!\n");
@@ -2130,10 +2163,8 @@ void *gps_task(void *arg)
 		}
 
 		// Wait utill FIFO write is ready
-		pthread_mutex_lock(&(s->gps.lock));
 		while (!is_fifo_write_ready(s))
 			pthread_cond_wait(&(s->fifo_write_ready), &(s->gps.lock));
-		pthread_mutex_unlock(&(s->gps.lock));
 
 		// Write into FIFO
 		memcpy(&(s->fifo[s->head * 2]), iq_buff, NUM_IQ_SAMPLES * 2 * sizeof(short));
@@ -2142,6 +2173,7 @@ void *gps_task(void *arg)
 		if (s->head >= FIFO_LENGTH)
 			s->head -= FIFO_LENGTH;
 		pthread_cond_signal(&(s->fifo_read_ready));
+		pthread_mutex_unlock(&(s->gps.lock));
 #endif
 		//
 		// Update navigation message and channel allocation every 30 seconds
@@ -2187,7 +2219,11 @@ void *gps_task(void *arg)
 	}
 
 	// Done!
+	pthread_mutex_lock(&(s->gps.lock));
 	s->finished = true;
+	pthread_cond_broadcast(&(s->fifo_read_ready));
+	pthread_cond_broadcast(&(s->fifo_write_ready));
+	pthread_mutex_unlock(&(s->gps.lock));
 
 	// Free I/Q buffer
 	free(iq_buff);
@@ -2211,6 +2247,13 @@ void *gps_task(void *arg)
 	return(0);
 #else
 exit:
+	pthread_mutex_lock(&(s->gps.lock));
+	s->finished = true;
+	s->gps.ready = 1;
+	pthread_cond_broadcast(&(s->gps.initialization_done));
+	pthread_cond_broadcast(&(s->fifo_read_ready));
+	pthread_cond_broadcast(&(s->fifo_write_ready));
+	pthread_mutex_unlock(&(s->gps.lock));
 	return (NULL);
 #endif
 }

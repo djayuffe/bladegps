@@ -1,6 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "bladegps.h"
+#include <errno.h>
+#include <math.h>
 
 // for _getch used in Windows runtime.
 #ifdef WIN32
@@ -9,6 +11,62 @@
 #else
 #include <unistd.h>
 #endif
+
+static int copy_option(char *dst, size_t dst_size, const char *src, const char *name)
+{
+	if (src == NULL || strlen(src) >= dst_size) {
+		fprintf(stderr, "ERROR: %s is too long. Maximum length is %zu characters.\n", name, dst_size - 1);
+		return -1;
+	}
+
+	strcpy(dst, src);
+	return 0;
+}
+
+static int parse_location(const char *arg, double llh[3])
+{
+	double lat, lon, hgt;
+	char extra;
+
+	if (sscanf(arg, "%lf,%lf,%lf%c", &lat, &lon, &hgt, &extra) != 3)
+		return -1;
+
+	if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0)
+		return -1;
+
+	llh[0] = lat / R2D;
+	llh[1] = lon / R2D;
+	llh[2] = hgt;
+	return 0;
+}
+
+static int parse_duration(const char *arg, int *iduration)
+{
+	char *end = NULL;
+	double duration;
+
+	errno = 0;
+	duration = strtod(arg, &end);
+	if (errno != 0 || end == arg || *end != '\0' || duration < 0.0 || duration > ((double)USER_MOTION_SIZE) / 10.0)
+		return -1;
+
+	*iduration = (int)(duration * 10.0 + 0.5);
+	return 0;
+}
+
+static int parse_xb_board(const char *arg, int *xb_board)
+{
+	char *end = NULL;
+	long value;
+
+	errno = 0;
+	value = strtol(arg, &end, 10);
+	if (errno != 0 || end == arg || *end != '\0' || value < 0 || value > 1000)
+		return -1;
+
+	*xb_board = (int)value;
+	return 0;
+}
 
 void init_sim(sim_t *s)
 {
@@ -101,9 +159,13 @@ void *tx_task(void *arg)
 		while (buffer_samples_remaining > 0) {
 			
 			pthread_mutex_lock(&(s->gps.lock));
-			while (get_sample_length(s) == 0)
+			while (get_sample_length(s) == 0 && !is_finished_generation(s))
 			{
 				pthread_cond_wait(&(s->fifo_read_ready), &(s->gps.lock));
+			}
+			if (get_sample_length(s) == 0 && is_finished_generation(s)) {
+				pthread_mutex_unlock(&(s->gps.lock));
+				goto out;
 			}
 //			assert(get_sample_length(s) > 0);
 
@@ -193,7 +255,6 @@ int main(int argc, char *argv[])
 	int xb_board=0;
 
 	int result;
-	double duration;
 	datetime_t t0;
 
 	if (argc<3)
@@ -210,7 +271,7 @@ int main(int argc, char *argv[])
 	s.opt.iduration = USER_MOTION_SIZE;
 	s.opt.verb = TRUE;
 	s.opt.nmeaGGA = FALSE;
-	s.opt.staticLocationMode = TRUE; // default user motion
+	s.opt.staticLocationMode = TRUE; // default static location
 	s.opt.llh[0] = 35.274016 / R2D;
 	s.opt.llh[1] = 137.013765 / R2D;
 	s.opt.llh[2] = 100.0;
@@ -221,15 +282,18 @@ int main(int argc, char *argv[])
 		switch (result)
 		{
 		case 'e':
-			strcpy(s.opt.navfile, optarg);
+			if (copy_option(s.opt.navfile, sizeof(s.opt.navfile), optarg, "GPS ephemeris path") != 0)
+				exit(1);
 			break;
 		case 'u':
-			strcpy(s.opt.umfile, optarg);
+			if (copy_option(s.opt.umfile, sizeof(s.opt.umfile), optarg, "user motion path") != 0)
+				exit(1);
 			s.opt.nmeaGGA = FALSE;
 			s.opt.staticLocationMode = FALSE;
 			break;
 		case 'g':
-			strcpy(s.opt.umfile, optarg);
+			if (copy_option(s.opt.umfile, sizeof(s.opt.umfile), optarg, "NMEA GGA path") != 0)
+				exit(1);
 			s.opt.nmeaGGA = TRUE;
 			s.opt.staticLocationMode = FALSE;
 			break;
@@ -238,12 +302,16 @@ int main(int argc, char *argv[])
 			// Added by scateu@gmail.com
 			s.opt.nmeaGGA = FALSE;
 			s.opt.staticLocationMode = TRUE;
-			sscanf(optarg,"%lf,%lf,%lf",&s.opt.llh[0],&s.opt.llh[1],&s.opt.llh[2]);
-			s.opt.llh[0] /= R2D; // convert to RAD
-			s.opt.llh[1] /= R2D; // convert to RAD
+			if (parse_location(optarg, s.opt.llh) != 0) {
+				printf("ERROR: Invalid static location. Expected Lat,Lon,Hgt.\n");
+				exit(1);
+			}
 			break;
 		case 't':
-			sscanf(optarg, "%d/%d/%d,%d:%d:%lf", &t0.y, &t0.m, &t0.d, &t0.hh, &t0.mm, &t0.sec);
+			if (sscanf(optarg, "%d/%d/%d,%d:%d:%lf", &t0.y, &t0.m, &t0.d, &t0.hh, &t0.mm, &t0.sec) != 6) {
+				printf("ERROR: Invalid date and time.\n");
+				exit(1);
+			}
 			if (t0.y<=1980 || t0.m<1 || t0.m>12 || t0.d<1 || t0.d>31 ||
 				t0.hh<0 || t0.hh>23 || t0.mm<0 || t0.mm>59 || t0.sec<0.0 || t0.sec>=60.0)
 			{
@@ -254,16 +322,16 @@ int main(int argc, char *argv[])
 			date2gps(&t0, &s.opt.g0);
 			break;
 		case 'd':
-			duration = atof(optarg);
-			if (duration<0.0 || duration>((double)USER_MOTION_SIZE)/10.0)
-			{
+			if (parse_duration(optarg, &s.opt.iduration) != 0) {
 				printf("ERROR: Invalid duration.\n");
 				exit(1);
 			}
-			s.opt.iduration = (int)(duration*10.0+0.5);
 			break;
 		case 'x':
-			xb_board=atoi(optarg);
+			if (parse_xb_board(optarg, &xb_board) != 0) {
+				printf("ERROR: Invalid XB board number.\n");
+				exit(1);
+			}
 			break;
 		case 'i':
 			s.opt.interactive = TRUE;
@@ -413,10 +481,10 @@ int main(int argc, char *argv[])
 		printf("Creating GPS task...\n");
 
 	// Wait until GPS task is initialized
-	pthread_mutex_lock(&(s.tx.lock));
+	pthread_mutex_lock(&(s.gps.lock));
 	while (!s.gps.ready)
-		pthread_cond_wait(&(s.gps.initialization_done), &(s.tx.lock));
-	pthread_mutex_unlock(&(s.tx.lock));
+		pthread_cond_wait(&(s.gps.initialization_done), &(s.gps.lock));
+	pthread_mutex_unlock(&(s.gps.lock));
 
 	// Fillfull the FIFO.
 	if (is_fifo_write_ready(&s))
