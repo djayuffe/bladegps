@@ -123,6 +123,13 @@ time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
 - If `-e` is omitted, the downloader fetches NOAA/NGS CORS RINEX v2 daily GPS navigation data from `https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz`.
 - Auto-downloaded ephemeris cache files are ignored by git so local runs do not dirty the repository.
+- The full module map, data flow, threading model, FIFO behavior, downloader lifecycle, and extension points are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Project documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - maintainer architecture, runtime flow, modules, and extension points.
+- [CHANGELOG.md](CHANGELOG.md) - release history.
+- [LICENSE](LICENSE) - MIT license.
 
 ## Release history
 
