@@ -1504,7 +1504,7 @@ void *gps_task(void *arg)
 	int numd;
 	char umfile[MAX_CHAR];
 	//double xyz[USER_MOTION_SIZE][3];
-	double **xyz;
+	double **xyz = NULL;
 
 	int staticLocationMode = FALSE;
 	int nmeaGGA = FALSE;
@@ -1691,7 +1691,7 @@ void *gps_task(void *arg)
 	////////////////////////////////////////////////////////////
 
 	// Allocate user motion array
-	xyz = (double **)malloc(USER_MOTION_SIZE * sizeof(*xyz));
+	xyz = (double **)calloc(USER_MOTION_SIZE, sizeof(*xyz));
 	
 	if (xyz==NULL)
 	{
@@ -1712,6 +1712,7 @@ void *gps_task(void *arg)
 			for (j=i-1; j>=0; j--)
 				free(xyz[j]);
 			free(xyz);
+			xyz = NULL;
 
 			printf("ERROR: Faild to allocate user motion array.\n");
 #ifndef BLADE_GPS
@@ -2008,6 +2009,12 @@ void *gps_task(void *arg)
 				case WEST_KEY:
 					key_direction = WEST;
 					break;
+				case UP_KEY:
+					key_direction = UP;
+					break;
+				case DOWN_KEY:
+					key_direction = DOWN;
+					break;
 				default:
 					break;
 				}
@@ -2056,6 +2063,13 @@ void *gps_task(void *arg)
 					break;
 				case WEST:
 					neu[1] = -velocity * 0.1;
+					break;
+				case UP:
+					neu[2] = velocity * 0.1;
+					break;
+				case DOWN:
+					neu[2] = -velocity * 0.1;
+					break;
 				default:
 					break;
 				}
@@ -2201,8 +2215,12 @@ void *gps_task(void *arg)
 		}
 
 		// Wait utill FIFO write is ready
-		while (!is_fifo_write_ready(s))
+		while (!is_fifo_write_ready(s) && !s->finished)
 			pthread_cond_wait(&(s->fifo_write_ready), &(s->gps.lock));
+		if (s->finished) {
+			pthread_mutex_unlock(&(s->gps.lock));
+			goto cleanup;
+		}
 
 		// Write into FIFO
 		memcpy(&(s->fifo[s->head * 2]), iq_buff, NUM_IQ_SAMPLES * 2 * sizeof(short));
@@ -2263,15 +2281,22 @@ void *gps_task(void *arg)
 	pthread_cond_broadcast(&(s->fifo_write_ready));
 	pthread_mutex_unlock(&(s->gps.lock));
 
+cleanup:
 	// Free I/Q buffer
 	free(iq_buff);
+	iq_buff = NULL;
 
 	// Free user motion array
-	for (i=0; i<USER_MOTION_SIZE; i++)
-		free(xyz[i]);
-	free(xyz);
+	if (xyz != NULL) {
+		for (i=0; i<USER_MOTION_SIZE; i++)
+			free(xyz[i]);
+		free(xyz);
+		xyz = NULL;
+	}
 
 #ifndef BLADE_GPS
+	free(iq8_buff);
+
 	// Close file
 	fclose(fp);
 
@@ -2285,6 +2310,12 @@ void *gps_task(void *arg)
 	return(0);
 #else
 exit:
+	free(iq_buff);
+	if (xyz != NULL) {
+		for (i=0; i<USER_MOTION_SIZE; i++)
+			free(xyz[i]);
+		free(xyz);
+	}
 	pthread_mutex_lock(&(s->gps.lock));
 	s->finished = true;
 	s->gps.ready = 1;

@@ -65,7 +65,7 @@ Options:
   -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss
   -d <duration>    Duration [sec] (max: 86400)
   -x <XB number>   Enable XB board, e.g. '-x 200' for XB200
-  -i               Interactive mode: North='w', South='s', East='d', West='a'
+  -i               Interactive mode: North='w', South='s', East='d', West='a', Up='e', Down='q'
 ```
 
 Static location example:
@@ -101,6 +101,14 @@ XB200 example:
 ```sh
 ./bladegps -e brdc2940.18n -l 35.274,137.014,100 -x 200 -d 60
 ```
+
+Interactive movement example:
+
+```sh
+./bladegps -e brdc2940.18n -l 59.3293,18.0686,30 -i -d 120
+```
+
+In interactive mode, `w/s/a/d` move north/south/west/east and `e/q` move up/down.
 
 ## Input files
 

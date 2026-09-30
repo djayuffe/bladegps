@@ -175,7 +175,7 @@ Supported modes:
 - Static LLH from `-l`.
 - CSV ECEF motion from `-u`.
 - NMEA GGA stream from `-g`.
-- Keyboard interactive motion from `-i`.
+- Keyboard interactive motion from `-i`: `w/s/a/d` for horizontal movement and `e/q` for up/down.
 
 Static LLH is converted through `llh2xyz()`. NMEA GGA is parsed into LLH and then ECEF. CSV motion expects:
 
@@ -265,7 +265,7 @@ The current code favors clear failure over partial or silent operation:
 - Malformed NMEA lines are skipped.
 - Malformed RINEX records stop parsing without indexing outside satellite bounds.
 - GPS initialization failure wakes waiting threads.
-- TX stream errors stop generation and return non-zero.
+- TX stream errors stop generation, wake the GPS producer if it is waiting for FIFO space, and return non-zero.
 - Download failures clean temporary files and suggest manual `-e`.
 
 ## Safety Model

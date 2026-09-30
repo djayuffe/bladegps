@@ -49,7 +49,7 @@ static int parse_duration(const char *arg, int *iduration)
 
 	errno = 0;
 	duration = strtod(arg, &end);
-	if (errno != 0 || end == arg || *end != '\0' || duration < 0.0 || duration > ((double)USER_MOTION_SIZE) / 10.0)
+	if (errno != 0 || end == arg || *end != '\0' || duration <= 0.0 || duration > ((double)USER_MOTION_SIZE) / 10.0)
 		return -1;
 
 	*iduration = (int)(duration * 10.0 + 0.5);
@@ -427,9 +427,9 @@ void usage(void)
 		"  -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss\n"
 		"  -d <duration>    Duration [sec] (max: %.0f)\n"
 		"  -x <XB number>   Enable XB board, e.g. '-x 200' for XB200\n"
-		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c'\n",
+		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n",
 		((double)USER_MOTION_SIZE)/10.0,
-		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY);
+		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY, UP_KEY, DOWN_KEY);
 
 	return;
 }
