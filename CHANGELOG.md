@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Corrected the Galileo convolutional encoder register orientation against all
+  three official OS SIS ICD 2.2 SSP symbol vectors.
+- Added nominal E1-B I/NAV vertical-page assembly with exact protected-field
+  ordering, CRC-24Q, convolutional encoding, 30x8 interleaving, sync symbols,
+  secondary synchronization patterns, and the nominal 30-second word schedule.
+- Added range-checked Galileo I/NAV word types 1-5 and exact conversion of
+  Galileo RINEX ephemeris/clock values into the ICD-scaled word types 1-4.
+- Corrected typed Galileo RINEX parsing so its three-field Orbit-5 and one-field
+  Orbit-7 lines no longer shift SISA, health, BGD, and transmission-time fields.
+- Added GLONASS GNAV 85/77 Hamming check-bit generation from the ICD 5.1
+  verification matrices, including total even parity.
+
+## Unreleased
+
 - Adds typed RINEX 3/4 navigation ingestion for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA records.
 - Preserves blank RINEX fields and skips unrelated RINEX 4 STO/ION/EOP and unsupported ephemeris message blocks without losing record synchronization.
 - Adds Galileo/BeiDou broadcast-Kepler propagation, including BeiDou GEO's ICD-defined tilted-frame transform and constellation clock/relativity models.

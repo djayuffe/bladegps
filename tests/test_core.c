@@ -194,7 +194,7 @@ static void test_multi_gnss_fec(void)
 {
 	static const uint8_t convolution_input[10] = {1,0,1,1,0,0,0,0,0,0};
 	static const uint8_t convolution_expected[20] = {
-		1,0,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,1,0
+		1,0,1,1,0,1,1,1,0,0,0,0,0,1,0,0,1,1,1,0
 	};
 	static const uint8_t bch_input[11] = {1,0,1,1,0,0,1,0,1,0,1};
 	static const uint8_t bch_expected[15] = {1,0,1,1,0,0,1,0,1,0,1,0,0,1,0};
@@ -205,6 +205,9 @@ static void test_multi_gnss_fec(void)
 	uint8_t interleaved[30];
 	uint8_t matrix_input[240];
 	uint8_t matrix_output[240];
+	uint8_t glonass_data[77];
+	uint8_t glonass_string[85];
+	uint32_t glonass_check_bits = 0U;
 	size_t byte, bit;
 
 	for (byte = 0; byte < 9U; byte++)
@@ -226,6 +229,130 @@ static void test_multi_gnss_fec(void)
 	assert(gnss_block_interleave(matrix_input, 30, 8, matrix_output, 240) == 0);
 	for (bit = 0; bit < 240U; bit++)
 		assert(matrix_output[(bit % 8U)*30U + bit/8U] == matrix_input[bit]);
+	for (bit = 0; bit < 77U; bit++)
+		glonass_data[bit] = (uint8_t)(((bit * 13U + bit / 5U) >> 1U) & 1U);
+	assert(gnss_glonass_hamming_85_77(glonass_data, glonass_string) == 0);
+	for (bit = 77U; bit < 85U; bit++)
+		glonass_check_bits = (glonass_check_bits << 1) | glonass_string[bit];
+	assert(glonass_check_bits == UINT32_C(0xa8));
+	for (bit = 0; bit < 77U; bit++)
+		assert(glonass_string[bit] == glonass_data[bit]);
+	glonass_data[3] = 2U;
+	assert(gnss_glonass_hamming_85_77(glonass_data, glonass_string) == -1);
+}
+
+static void test_galileo_inav_pages(void)
+{
+	static const char *ssp_plain[3] = {"00000100", "00101011", "00101111"};
+	static const char *ssp_encoded[3] = {
+		"1110100100100101", "0110110001001110", "1101000000111110"
+	};
+	static const uint8_t sync[10] = {0,1,0,1,1,0,0,0,0,0};
+	uint8_t input[120] = {0};
+	uint8_t encoded[240];
+	uint8_t word[GALILEO_INAV_WORD_BITS];
+	uint8_t osnma[GALILEO_INAV_OSNMA_BITS];
+	uint8_t sar[GALILEO_INAV_SAR_BITS];
+	uint8_t even[GALILEO_INAV_PAGE_PART_SYMBOLS];
+	uint8_t odd[GALILEO_INAV_PAGE_PART_SYMBOLS];
+	uint32_t crc;
+	size_t pattern, index;
+
+	/* Galileo OS SIS ICD 2.2 Table 85: the last 16 encoder symbols are
+	 * authoritative vectors for register orientation and G2 inversion. */
+	for (pattern = 0; pattern < 3U; pattern++) {
+		memset(input, 0, sizeof(input));
+		for (index = 0; index < 8U; index++)
+			input[106U + index] = (uint8_t)(ssp_plain[pattern][index] - '0');
+		assert(gnss_galileo_convolutional_encode(input, 120U, encoded,
+			sizeof(encoded)) == 0);
+		for (index = 0; index < 16U; index++)
+			assert(encoded[224U + index] ==
+				(uint8_t)(ssp_encoded[pattern][index] - '0'));
+	}
+
+	for (index = 0; index < GALILEO_INAV_WORD_BITS; index++)
+		word[index] = (uint8_t)(((index * 7U) + 3U) & 1U);
+	for (index = 0; index < GALILEO_INAV_OSNMA_BITS; index++)
+		osnma[index] = (uint8_t)((index / 3U) & 1U);
+	for (index = 0; index < GALILEO_INAV_SAR_BITS; index++)
+		sar[index] = (uint8_t)((index / 2U) & 1U);
+	assert(gnss_galileo_inav_e1b_page(word, osnma, sar, 2U,
+		GALILEO_INAV_SSP2, even, odd, &crc) == 0);
+	assert(memcmp(even, sync, sizeof(sync)) == 0);
+	assert(memcmp(odd, sync, sizeof(sync)) == 0);
+	assert(crc == UINT32_C(0x232d71));
+	for (index = 0; index < GALILEO_INAV_PAGE_PART_SYMBOLS; index++) {
+		assert(even[index] <= 1U);
+		assert(odd[index] <= 1U);
+	}
+	word[0] = 2U;
+	assert(gnss_galileo_inav_e1b_page(word, osnma, sar, 0U,
+		GALILEO_INAV_SSP1, even, odd, NULL) == -1);
+	assert(gnss_galileo_inav_e1b_word_type(0U) == 16);
+	assert(gnss_galileo_inav_e1b_word_type(21U) == 1);
+	assert(gnss_galileo_inav_e1b_word_type(29U) == 16);
+	assert(gnss_galileo_inav_e1b_word_type(30U) == -1);
+	assert(gnss_galileo_inav_ssp_for_second(0U) == GALILEO_INAV_SSP3);
+	assert(gnss_galileo_inav_ssp_for_second(2U) == GALILEO_INAV_SSP1);
+	assert(gnss_galileo_inav_ssp_for_second(4U) == GALILEO_INAV_SSP2);
+}
+
+static uint32_t unpack_bits(const uint8_t *bits, size_t offset, size_t width)
+{
+	uint32_t value = 0U;
+	size_t index;
+	for (index = 0; index < width; index++)
+		value = (value << 1) | bits[offset + index];
+	return value;
+}
+
+static void test_galileo_inav_words(void)
+{
+	galileo_inav_word1_t w1 = {0x155U, 10080U, -1234567, 0x12345678U, 0x87654321U};
+	galileo_inav_word2_t w2 = {7U, INT32_MIN, INT32_MAX, -1, -8192};
+	galileo_inav_word3_t w3 = {9U, -8388608, -32768, 32767, -1, 0, 1, 255U};
+	galileo_inav_word4_t w4 = {1023U, 36U, -2, 3, 10079U, -1073741824, 1048575, -32};
+	galileo_inav_word5_t w5 = {2047U, -1024, 8191, 0x15U, -512, 511,
+		3U, 2U, 1U, 0U, 4095U, 604799U};
+	uint8_t word[GALILEO_INAV_WORD_BITS];
+
+	assert(gnss_galileo_inav_word1(&w1, word) == 0);
+	assert(unpack_bits(word,0,6) == 1U && unpack_bits(word,6,10) == 0x155U);
+	assert(unpack_bits(word,16,14) == 10080U);
+	assert(unpack_bits(word,30,32) == (uint32_t)-1234567);
+	assert(unpack_bits(word,62,32) == 0x12345678U);
+	assert(unpack_bits(word,94,32) == 0x87654321U && unpack_bits(word,126,2) == 0U);
+	w1.toe = 16384U;
+	assert(gnss_galileo_inav_word1(&w1, word) == -1);
+
+	assert(gnss_galileo_inav_word2(&w2, word) == 0);
+	assert(unpack_bits(word,0,6) == 2U && unpack_bits(word,16,32) == UINT32_C(0x80000000));
+	assert(unpack_bits(word,112,14) == 0x2000U && unpack_bits(word,126,2) == 0U);
+	w2.inclination_rate = 8192;
+	assert(gnss_galileo_inav_word2(&w2, word) == -1);
+
+	assert(gnss_galileo_inav_word3(&w3, word) == 0);
+	assert(unpack_bits(word,0,6) == 3U && unpack_bits(word,16,24) == 0x800000U);
+	assert(unpack_bits(word,40,16) == 0x8000U && unpack_bits(word,120,8) == 255U);
+	w3.omega_rate = 8388608;
+	assert(gnss_galileo_inav_word3(&w3, word) == -1);
+
+	assert(gnss_galileo_inav_word4(&w4, word) == 0);
+	assert(unpack_bits(word,0,6) == 4U && unpack_bits(word,6,10) == 1023U);
+	assert(unpack_bits(word,16,6) == 36U && unpack_bits(word,68,31) == 0x40000000U);
+	assert(unpack_bits(word,120,6) == 0x20U && unpack_bits(word,126,2) == 0U);
+	w4.svid = 0U;
+	assert(gnss_galileo_inav_word4(&w4, word) == -1);
+
+	assert(gnss_galileo_inav_word5(&w5, word) == 0);
+	assert(unpack_bits(word,0,6) == 5U && unpack_bits(word,6,11) == 2047U);
+	assert(unpack_bits(word,17,11) == 0x400U && unpack_bits(word,28,14) == 0x1fffU);
+	assert(unpack_bits(word,42,5) == 0x15U && unpack_bits(word,47,10) == 0x200U);
+	assert(unpack_bits(word,73,12) == 4095U && unpack_bits(word,85,20) == 604799U);
+	assert(unpack_bits(word,105,23) == 0U);
+	w5.tow = 1048576U;
+	assert(gnss_galileo_inav_word5(&w5, word) == -1);
 }
 
 static void test_llh_motion(void)
@@ -244,6 +371,7 @@ static void test_llh_motion(void)
 static void test_rinex4_mixed_navigation(void)
 {
 	gnss_nav_record_t records[4];
+	uint8_t galileo_words[4][GALILEO_INAV_WORD_BITS];
 	size_t count = 0;
 	double position[3];
 	double velocity[3];
@@ -255,9 +383,19 @@ static void test_rinex4_mixed_navigation(void)
 	assert(count == 3);
 	assert(records[0].system == GNSS_SYSTEM_GALILEO && records[0].prn == 12);
 	assert(strcmp(records[0].message, "INAV") == 0);
-	assert(records[0].model == GNSS_NAV_KEPLERIAN && records[0].orbit_count == 28);
+	assert(records[0].model == GNSS_NAV_KEPLERIAN && records[0].orbit_count == 24);
 	assert(fabs(records[0].orbit[7] - 5440.609727859) < 1.0e-9);
-	assert(isnan(records[0].orbit[25]) && isnan(records[0].orbit[26]) && isnan(records[0].orbit[27]));
+	assert(records[0].orbit[19] == 3.12 && records[0].orbit[23] == 176434.0);
+	assert(gnss_galileo_inav_ephemeris_words(&records[0], galileo_words) == 0);
+	assert(unpack_bits(galileo_words[0],0,6) == 1U);
+	assert(unpack_bits(galileo_words[1],0,6) == 2U);
+	assert(unpack_bits(galileo_words[2],0,6) == 3U);
+	assert(unpack_bits(galileo_words[3],0,6) == 4U);
+	assert(unpack_bits(galileo_words[0],6,10) == 36U);
+	assert(unpack_bits(galileo_words[0],16,14) == 2920U);
+	assert(unpack_bits(galileo_words[2],120,8) == 107U);
+	assert(unpack_bits(galileo_words[3],16,6) == 12U);
+	assert(unpack_bits(galileo_words[3],54,14) == 2920U);
 	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
 	assert(strcmp(records[1].message, "D1") == 0);
 	assert(isnan(records[1].orbit[17]) && records[1].orbit[18] == 809.0);
@@ -318,6 +456,8 @@ int main(void)
 	test_signal_profiles();
 	test_multi_gnss_codes();
 	test_multi_gnss_fec();
+	test_galileo_inav_pages();
+	test_galileo_inav_words();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32

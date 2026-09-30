@@ -201,8 +201,18 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 		continuation_lines = record.system == GNSS_SYSTEM_GLONASS ?
 			(rinex4 ? 4U : 3U) : 7U;
 		for (line_index = 0; line_index < continuation_lines; line_index++) {
+			size_t field_count = 4U;
+			/* RINEX 3/4 Galileo A13 defines three fields on Broadcast
+			 * Orbit-5 and one on Orbit-7.  Treating the unused print columns
+			 * as data shifts SISA, health and BGD semantics by one slot. */
+			if (record.system == GNSS_SYSTEM_GALILEO) {
+				if (line_index == 4U)
+					field_count = 3U;
+				else if (line_index == 6U)
+					field_count = 1U;
+			}
 			if (fgets(line, sizeof(line), stream) == NULL ||
-				parse_orbit_line(line, &record, 4U) != 0)
+				parse_orbit_line(line, &record, field_count) != 0)
 				goto fail;
 		}
 		if (count >= capacity)

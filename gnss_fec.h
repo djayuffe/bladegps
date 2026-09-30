@@ -12,5 +12,6 @@ int gnss_block_interleave(const uint8_t *input, size_t columns, size_t rows,
 int gnss_beidou_bch15_11(const uint8_t information[11], uint8_t codeword[15]);
 int gnss_beidou_interleave_2x15(const uint8_t first[15],
 	const uint8_t second[15], uint8_t output[30]);
+int gnss_glonass_hamming_85_77(const uint8_t data[77], uint8_t string[85]);
 
 #endif
