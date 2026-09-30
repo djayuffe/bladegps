@@ -11,20 +11,19 @@
 #endif
 #include <pthread.h>
 #include "gpssim.h"
+#include "gnss.h"
 
-#define TX_FREQUENCY	1575420000
-#define TX_SAMPLERATE	2600000
-#define TX_BANDWIDTH	2500000
-#define TX_VGA1			-25
-#define TX_VGA2			0
+#define DEFAULT_TX_FREQUENCY	1575420000U
+#define DEFAULT_TX_SAMPLERATE	2600000U
+#define DEFAULT_TX_BANDWIDTH	2500000U
+#define DEFAULT_TX_VGA1			-25
+#define DEFAULT_TX_VGA2			0
 
 #define NUM_BUFFERS			32
 #define SAMPLES_PER_BUFFER	(32 * 1024)
 #define NUM_TRANSFERS		16
 #define TIMEOUT_MS			1000
 
-#define NUM_IQ_SAMPLES  (TX_SAMPLERATE / 10)
-#define FIFO_LENGTH     (NUM_IQ_SAMPLES * 2)
 
 // Interactive mode directions
 #define UNDEF 0
@@ -48,8 +47,17 @@
 typedef struct {
 	char navfile[MAX_CHAR];
 	char umfile[MAX_CHAR];
+	char device[MAX_CHAR];
+	gnss_signal_t signal;
+	unsigned int tx_frequency;
+	unsigned int tx_sample_rate;
+	unsigned int tx_bandwidth;
+	int tx_vga1;
+	int tx_vga2;
+	double elevation_mask;
 	int staticLocationMode;
 	int nmeaGGA;
+	int geodeticMotion;
 	int iduration;
 	int verb;
 	gpstime_t g0;
@@ -85,6 +93,8 @@ typedef struct {
 	bool finished;
 	int16_t *fifo;
 	long head, tail;
+	size_t iq_block_samples;
+	size_t fifo_length;
 	size_t sample_length;
 
 	pthread_cond_t fifo_read_ready;

@@ -2,6 +2,7 @@
 
 #include "bladegps.h"
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <signal.h>
 #include <time.h>
@@ -81,6 +82,46 @@ static int parse_xb_board(const char *arg, int *xb_board)
 		return -1;
 
 	*xb_board = (int)value;
+	return 0;
+}
+
+static int parse_uint_option(const char *arg, unsigned int minimum,
+	unsigned int maximum, unsigned int *value)
+{
+	char *end = NULL;
+	unsigned long parsed;
+
+	errno = 0;
+	parsed = strtoul(arg, &end, 10);
+	if (errno != 0 || end == arg || *end != '\0' || parsed < minimum || parsed > maximum)
+		return -1;
+	*value = (unsigned int)parsed;
+	return 0;
+}
+
+static int parse_int_option(const char *arg, int minimum, int maximum, int *value)
+{
+	char *end = NULL;
+	long parsed;
+
+	errno = 0;
+	parsed = strtol(arg, &end, 10);
+	if (errno != 0 || end == arg || *end != '\0' || parsed < minimum || parsed > maximum)
+		return -1;
+	*value = (int)parsed;
+	return 0;
+}
+
+static int parse_elevation_mask(const char *arg, double *value)
+{
+	char *end = NULL;
+	double parsed;
+
+	errno = 0;
+	parsed = strtod(arg, &end);
+	if (errno != 0 || end == arg || *end != '\0' || !isfinite(parsed) || parsed < -90.0 || parsed > 90.0)
+		return -1;
+	*value = parsed;
 	return 0;
 }
 
@@ -175,8 +216,10 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	char gz_path[MAX_CHAR];
 	char tmp_gz_path[MAX_CHAR + 8];
 	char tmp_out_path[MAX_CHAR + 8];
-	char url[256];
+	char urls[2][256];
 	char cmd[768];
+	size_t source;
+	int downloaded = 0;
 
 	doy = day_of_year(date);
 	if (doy < 1)
@@ -197,12 +240,15 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	if (snprintf(tmp_out_path, sizeof(tmp_out_path), "%s.tmp", out_path) >= (int)sizeof(tmp_out_path))
 		return -1;
 
-	if (snprintf(url, sizeof(url),
+	if (snprintf(urls[0], sizeof(urls[0]),
 		"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
-		date->y, doy, doy, yy) >= (int)sizeof(url))
+		date->y, doy, doy, yy) >= (int)sizeof(urls[0]))
+		return -1;
+	if (snprintf(urls[1], sizeof(urls[1]),
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/brdc%03d0.%02dn.gz",
+		date->y, doy, doy, yy) >= (int)sizeof(urls[1]))
 		return -1;
 
-	printf("Downloading broadcast ephemeris: %s\n", url);
 	remove(tmp_gz_path);
 	remove(tmp_out_path);
 
@@ -216,9 +262,22 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	if (run_command(cmd, "find gzip in PATH") != 0)
 		return -1;
 
-	if (snprintf(cmd, sizeof(cmd), "curl -fL --retry 2 --connect-timeout 15 -o \"%s\" \"%s\"", tmp_gz_path, url) >= (int)sizeof(cmd))
-		return -1;
-	if (run_command(cmd, "download broadcast ephemeris") != 0)
+	for (source = 0; source < sizeof(urls) / sizeof(urls[0]); source++) {
+		printf("Downloading broadcast ephemeris from source %zu/%zu: %s\n",
+			source + 1, sizeof(urls) / sizeof(urls[0]), urls[source]);
+		remove(tmp_gz_path);
+		if (snprintf(cmd, sizeof(cmd),
+			"curl -fL --retry 2 --connect-timeout 15 -o \"%s\" \"%s\"",
+			tmp_gz_path, urls[source]) >= (int)sizeof(cmd))
+			goto fail;
+		if (run_command(cmd, "download broadcast ephemeris") == 0 && file_exists(tmp_gz_path)) {
+			downloaded = 1;
+			break;
+		}
+		fprintf(stderr, "WARNING: Ephemeris source %zu failed; trying the next source.\n",
+			source + 1);
+	}
+	if (!downloaded)
 		goto fail;
 
 	if (!file_exists(tmp_gz_path)) {
@@ -272,6 +331,8 @@ void init_sim(sim_t *s)
 	s->status = 0;
 	s->finished = false;
 	s->fifo = NULL;
+	s->iq_block_samples = s->opt.tx_sample_rate / 10U;
+	s->fifo_length = s->iq_block_samples * 2U;
 	s->head = 0;
 	s->tail = 0;
 	s->sample_length = 0;
@@ -288,7 +349,7 @@ size_t get_sample_length(sim_t *s)
 
 	length = s->head - s->tail;
 	if (length < 0)
-		length += FIFO_LENGTH;
+		length += (long)s->fifo_length;
 
 	return((size_t)length);
 }
@@ -306,7 +367,7 @@ size_t fifo_read(int16_t *buffer, size_t samples, sim_t *s)
 
 	length = samples; // return value
 
-	samples_remaining = FIFO_LENGTH - s->tail;
+	samples_remaining = s->fifo_length - (size_t)s->tail;
 
 	if (samples > samples_remaining) {
 		memcpy(buffer_current, &(s->fifo[s->tail * 2]), samples_remaining * sizeof(int16_t) * 2);
@@ -317,8 +378,8 @@ size_t fifo_read(int16_t *buffer, size_t samples, sim_t *s)
 
 	memcpy(buffer_current, &(s->fifo[s->tail * 2]), samples * sizeof(int16_t) * 2);
 	s->tail += (long)samples;
-	if (s->tail >= FIFO_LENGTH)
-		s->tail -= FIFO_LENGTH;
+	if ((size_t)s->tail >= s->fifo_length)
+		s->tail -= (long)s->fifo_length;
 
 	return(length);
 }
@@ -333,7 +394,7 @@ int is_fifo_write_ready(sim_t *s)
 	int status = 0;
 
 	s->sample_length = get_sample_length(s);
-	if (s->sample_length < NUM_IQ_SAMPLES)
+	if (s->sample_length < s->iq_block_samples)
 		status = 1;
 
 	return(status);
@@ -433,11 +494,21 @@ void usage(void)
 		"Options:\n"
 		"  -e <gps_nav>     RINEX navigation file for GPS ephemerides (auto-downloads if omitted)\n"
 		"  -u <user_motion> User motion file (dynamic mode)\n"
+		"  -p <llh_motion>  Geodetic CSV motion: time,latitude,longitude,height\n"
 		"  -g <nmea_gga>    NMEA GGA stream (dynamic mode)\n"
 		"  -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100\n"
 		"  -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss\n"
 		"  -d <duration>    Duration [sec] (max: %.0f)\n"
 		"  -x <XB number>   Enable XB board, e.g. '-x 200' for XB200\n"
+		"  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of)\n"
+		"  -L               List signal profiles and implementation status\n"
+		"  -D <device>      libbladeRF device identifier\n"
+		"  -f <Hz>          TX center frequency\n"
+		"  -r <samples/s>   TX sample rate (must be divisible by 10)\n"
+		"  -b <Hz>          TX analog bandwidth\n"
+		"  -a <dB>          TX VGA1 gain\n"
+		"  -A <dB>          TX VGA2 gain\n"
+		"  -M <degrees>     Satellite elevation mask (-90 to 90)\n"
 		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n",
 		((double)USER_MOTION_SIZE)/10.0,
 		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY, UP_KEY, DOWN_KEY);
@@ -448,22 +519,29 @@ void usage(void)
 int main(int argc, char *argv[])
 {
 	sim_t s;
-	char *devstr = NULL;
+	char *devstr;
 	int xb_board=0;
 	int exit_code = 1;
 	int gps_started = 0;
 	int tx_enabled = 0;
+	unsigned int actual_sample_rate = 0;
+	unsigned int actual_bandwidth = 0;
 
 	int result;
 	datetime_t t0;
 	datetime_t navdate;
 	int navdate_set = 0;
+	int list_signals = 0;
+	int tx_frequency_set = 0;
+	int tx_sample_rate_set = 0;
+	int tx_bandwidth_set = 0;
+	const gnss_signal_profile_t *signal_profile;
 	void (*previous_sigint)(int);
 #ifdef SIGTERM
 	void (*previous_sigterm)(int);
 #endif
 
-	if (argc<3)
+	if (argc<2)
 	{
 		usage();
 		exit(1);
@@ -472,18 +550,27 @@ int main(int argc, char *argv[])
 
 	s.opt.navfile[0] = 0;
 	s.opt.umfile[0] = 0;
+	s.opt.device[0] = 0;
+	s.opt.signal = GNSS_SIGNAL_GPS_L1CA;
+	s.opt.tx_frequency = DEFAULT_TX_FREQUENCY;
+	s.opt.tx_sample_rate = DEFAULT_TX_SAMPLERATE;
+	s.opt.tx_bandwidth = DEFAULT_TX_BANDWIDTH;
+	s.opt.tx_vga1 = DEFAULT_TX_VGA1;
+	s.opt.tx_vga2 = DEFAULT_TX_VGA2;
+	s.opt.elevation_mask = 0.0;
 	s.opt.g0.week = -1;
 	s.opt.g0.sec = 0.0;
 	s.opt.iduration = USER_MOTION_SIZE;
 	s.opt.verb = TRUE;
 	s.opt.nmeaGGA = FALSE;
+	s.opt.geodeticMotion = FALSE;
 	s.opt.staticLocationMode = TRUE; // default static location
 	s.opt.llh[0] = 35.274016 / R2D;
 	s.opt.llh[1] = 137.013765 / R2D;
 	s.opt.llh[2] = 100.0;
 	s.opt.interactive = FALSE;
 
-	while ((result=getopt(argc,argv,"e:u:g:l:t:d:x:i"))!=-1)
+	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:iS:LD:f:r:b:a:A:M:"))!=-1)
 	{
 		switch (result)
 		{
@@ -495,18 +582,28 @@ int main(int argc, char *argv[])
 			if (copy_option(s.opt.umfile, sizeof(s.opt.umfile), optarg, "user motion path") != 0)
 				exit(1);
 			s.opt.nmeaGGA = FALSE;
+			s.opt.geodeticMotion = FALSE;
+			s.opt.staticLocationMode = FALSE;
+			break;
+		case 'p':
+			if (copy_option(s.opt.umfile, sizeof(s.opt.umfile), optarg, "geodetic motion path") != 0)
+				exit(1);
+			s.opt.nmeaGGA = FALSE;
+			s.opt.geodeticMotion = TRUE;
 			s.opt.staticLocationMode = FALSE;
 			break;
 		case 'g':
 			if (copy_option(s.opt.umfile, sizeof(s.opt.umfile), optarg, "NMEA GGA path") != 0)
 				exit(1);
 			s.opt.nmeaGGA = TRUE;
+			s.opt.geodeticMotion = FALSE;
 			s.opt.staticLocationMode = FALSE;
 			break;
 		case 'l':
 			// Static geodetic coordinates input mode
 			// Added by scateu@gmail.com
 			s.opt.nmeaGGA = FALSE;
+			s.opt.geodeticMotion = FALSE;
 			s.opt.staticLocationMode = TRUE;
 			if (parse_location(optarg, s.opt.llh) != 0) {
 				printf("ERROR: Invalid static location. Expected Lat,Lon,Hgt.\n");
@@ -544,6 +641,59 @@ int main(int argc, char *argv[])
 		case 'i':
 			s.opt.interactive = TRUE;
 			break;
+		case 'S':
+			if (gnss_signal_parse(optarg, &s.opt.signal) != 0) {
+				fprintf(stderr, "ERROR: Unknown signal profile '%s'. Use -L to list profiles.\n", optarg);
+				exit(1);
+			}
+			break;
+		case 'L':
+			list_signals = 1;
+			break;
+		case 'D':
+			if (copy_option(s.opt.device, sizeof(s.opt.device), optarg, "bladeRF device identifier") != 0)
+				exit(1);
+			break;
+		case 'f':
+			if (parse_uint_option(optarg, 1U, UINT_MAX, &s.opt.tx_frequency) != 0) {
+				fprintf(stderr, "ERROR: Invalid TX center frequency.\n");
+				exit(1);
+			}
+			tx_frequency_set = 1;
+			break;
+		case 'b':
+			if (parse_uint_option(optarg, 1U, UINT_MAX, &s.opt.tx_bandwidth) != 0) {
+				fprintf(stderr, "ERROR: Invalid TX bandwidth.\n");
+				exit(1);
+			}
+			tx_bandwidth_set = 1;
+			break;
+		case 'r':
+			if (parse_uint_option(optarg, 1000000U, 100000000U, &s.opt.tx_sample_rate) != 0 ||
+				s.opt.tx_sample_rate % 10U != 0U) {
+				fprintf(stderr, "ERROR: Invalid sample rate; use at least 1000000 samples/s and a multiple of 10.\n");
+				exit(1);
+			}
+			tx_sample_rate_set = 1;
+			break;
+		case 'a':
+			if (parse_int_option(optarg, -100, 100, &s.opt.tx_vga1) != 0) {
+				fprintf(stderr, "ERROR: Invalid TX VGA1 gain.\n");
+				exit(1);
+			}
+			break;
+		case 'A':
+			if (parse_int_option(optarg, -100, 100, &s.opt.tx_vga2) != 0) {
+				fprintf(stderr, "ERROR: Invalid TX VGA2 gain.\n");
+				exit(1);
+			}
+			break;
+		case 'M':
+			if (parse_elevation_mask(optarg, &s.opt.elevation_mask) != 0) {
+				fprintf(stderr, "ERROR: Invalid elevation mask.\n");
+				exit(1);
+			}
+			break;
 		case ':':
 		case '?':
 			usage();
@@ -552,6 +702,33 @@ int main(int argc, char *argv[])
 			break;
 		}
 	}
+
+	if (list_signals) {
+		gnss_print_signal_profiles();
+		return 0;
+	}
+
+	signal_profile = gnss_signal_profile(s.opt.signal);
+	if (signal_profile != NULL) {
+		if (!tx_frequency_set)
+			s.opt.tx_frequency = (unsigned int)signal_profile->carrier_hz;
+		if (!tx_sample_rate_set)
+			s.opt.tx_sample_rate = (unsigned int)signal_profile->minimum_sample_rate_hz;
+		if (!tx_bandwidth_set)
+			s.opt.tx_bandwidth = (unsigned int)signal_profile->recommended_bandwidth_hz;
+	}
+	if (signal_profile == NULL || !signal_profile->waveform_implemented) {
+		fprintf(stderr, "ERROR: %s is registered but its waveform backend is not implemented yet.\n",
+			signal_profile != NULL ? signal_profile->name : "selected signal");
+		return 1;
+	}
+	if (!gnss_frequency_fits((double)s.opt.tx_frequency, (double)s.opt.tx_sample_rate,
+		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz)) {
+		fprintf(stderr, "ERROR: Selected sample rate/center frequency does not contain the %s signal.\n",
+			signal_profile->name);
+		return 1;
+	}
+	devstr = s.opt.device[0] != 0 ? s.opt.device : NULL;
 
 	if (s.opt.navfile[0]==0) {
 		if (!navdate_set && utc_today(&navdate) != 0) {
@@ -587,7 +764,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Allocate FIFOs to hold 0.1 seconds of I/Q samples each.
-	s.fifo = (int16_t *)malloc(FIFO_LENGTH * sizeof(int16_t) * 2); // for 16-bit I and Q samples
+	s.fifo = (int16_t *)malloc(s.fifo_length * sizeof(int16_t) * 2); // complex I/Q samples
 
 	if (s.fifo == NULL) {
 		fprintf(stderr, "Failed to allocate I/Q sample buffer.\n");
@@ -643,49 +820,58 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	s.status = bladerf_set_frequency(s.tx.dev, BLADERF_MODULE_TX, TX_FREQUENCY);
+	s.status = bladerf_set_frequency(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_frequency);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to set TX frequency: %s\n", bladerf_strerror(s.status));
 		goto out;
 	} 
 	else {
-		printf("TX frequency: %u Hz\n", TX_FREQUENCY);
+		printf("TX frequency: %u Hz\n", s.opt.tx_frequency);
 	}
 
-	s.status = bladerf_set_sample_rate(s.tx.dev, BLADERF_MODULE_TX, TX_SAMPLERATE, NULL);
+	s.status = bladerf_set_sample_rate(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_sample_rate,
+		&actual_sample_rate);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to set TX sample rate: %s\n", bladerf_strerror(s.status));
 		goto out;
 	}
+	else if (actual_sample_rate != s.opt.tx_sample_rate) {
+		fprintf(stderr,
+			"Failed to realize exact TX sample rate: requested %u sps, hardware selected %u sps.\n",
+			s.opt.tx_sample_rate, actual_sample_rate);
+		goto out;
+	}
 	else {
-		printf("TX sample rate: %u sps\n", TX_SAMPLERATE);
+		printf("TX sample rate: %u sps\n", actual_sample_rate);
 	}
 
-	s.status = bladerf_set_bandwidth(s.tx.dev, BLADERF_MODULE_TX, TX_BANDWIDTH, NULL);
+	s.status = bladerf_set_bandwidth(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_bandwidth,
+		&actual_bandwidth);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to set TX bandwidth: %s\n", bladerf_strerror(s.status));
 		goto out;
 	}
 	else {
-		printf("TX bandwidth: %u Hz\n", TX_BANDWIDTH);
+		printf("TX bandwidth: %u Hz (requested %u Hz)\n", actual_bandwidth,
+			s.opt.tx_bandwidth);
 	}
 
-	s.status = bladerf_set_txvga1(s.tx.dev, TX_VGA1);
+	s.status = bladerf_set_txvga1(s.tx.dev, s.opt.tx_vga1);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to set TX VGA1 gain: %s\n", bladerf_strerror(s.status));
 		goto out;
 	}
 	else {
-		printf("TX VGA1 gain: %d dB\n", TX_VGA1);
+		printf("TX VGA1 gain: %d dB\n", s.opt.tx_vga1);
 	}
 
-	s.status = bladerf_set_txvga2(s.tx.dev, TX_VGA2);
+	s.status = bladerf_set_txvga2(s.tx.dev, s.opt.tx_vga2);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to set TX VGA2 gain: %s\n", bladerf_strerror(s.status));
 		goto out;
 	}
 	else {
-		printf("TX VGA2 gain: %d dB\n", TX_VGA2);
+		printf("TX VGA2 gain: %d dB\n", s.opt.tx_vga2);
 	}
 
 	// Start GPS task.

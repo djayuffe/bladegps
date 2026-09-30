@@ -1395,6 +1395,37 @@ int readUserMotion(double **xyz, const char *filename)
 	return (numd);
 }
 
+int readLlhMotion(double **xyz, const char *filename)
+{
+	FILE *fp;
+	int numd;
+	char str[MAX_CHAR];
+	double time_seconds,latitude,longitude,height;
+	double llh[3];
+
+	if (NULL==(fp=fopen(filename,"rt")))
+		return -1;
+
+	for (numd=0; numd<USER_MOTION_SIZE; numd++) {
+		if (fgets(str, MAX_CHAR, fp)==NULL)
+			break;
+		if (sscanf(str, "%lf,%lf,%lf,%lf", &time_seconds, &latitude,
+			&longitude, &height) != 4 || !isfinite(time_seconds) ||
+			!isfinite(latitude) || !isfinite(longitude) || !isfinite(height) ||
+			latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+			fclose(fp);
+			return -2;
+		}
+		llh[0] = latitude/R2D;
+		llh[1] = longitude/R2D;
+		llh[2] = height;
+		llh2xyz(llh, xyz[numd]);
+	}
+
+	fclose(fp);
+	return numd;
+}
+
 //int readNmeaGGA(double xyz[USER_MOTION_SIZE][3], const char *filename)
 int readNmeaGGA(double **xyz, const char *filename)
 {
@@ -1744,6 +1775,7 @@ void *gps_task(void *arg)
 
 	int staticLocationMode = FALSE;
 	int nmeaGGA = FALSE;
+	int geodeticMotion = FALSE;
 
 	char navfile[MAX_CHAR];
 
@@ -1910,13 +1942,15 @@ void *gps_task(void *arg)
 	gps2date(&g0, &t0);
 
 	nmeaGGA = s->opt.nmeaGGA;
+	geodeticMotion = s->opt.geodeticMotion;
 
 	iduration = s->opt.iduration;
 	verb = s->opt.verb;
+	elvmask = s->opt.elevation_mask;
 
-	iq_buff_size = NUM_IQ_SAMPLES;
+	iq_buff_size = (int)s->iq_block_samples;
 
-	delt = 1.0/(double)TX_SAMPLERATE;
+	delt = 1.0/(double)s->opt.tx_sample_rate;
 
 	interactive = s->opt.interactive;
 #endif
@@ -1951,6 +1985,8 @@ void *gps_task(void *arg)
 		// Read user motion file
 		if (nmeaGGA==TRUE)
 			numd = readNmeaGGA(xyz, umfile);
+		else if (geodeticMotion==TRUE)
+			numd = readLlhMotion(xyz, umfile);
 		else
 		{
 			numd = readUserMotion(xyz, umfile);
@@ -2434,11 +2470,11 @@ void *gps_task(void *arg)
 		}
 
 		// Write into FIFO
-		memcpy(&(s->fifo[s->head * 2]), iq_buff, NUM_IQ_SAMPLES * 2 * sizeof(short));
+		memcpy(&(s->fifo[s->head * 2]), iq_buff, s->iq_block_samples * 2 * sizeof(short));
 
-		s->head += (long)NUM_IQ_SAMPLES;
-		if (s->head >= FIFO_LENGTH)
-			s->head -= FIFO_LENGTH;
+		s->head += (long)s->iq_block_samples;
+		if ((size_t)s->head >= s->fifo_length)
+			s->head -= (long)s->fifo_length;
 		pthread_cond_signal(&(s->fifo_read_ready));
 		pthread_mutex_unlock(&(s->gps.lock));
 #endif

@@ -2,7 +2,7 @@
 
 This document describes how bladeGPS is organized, how data moves through the simulator, and where to change specific behavior. It is intended for maintainers who need to audit, extend, port, or debug the project.
 
-bladeGPS is a real-time GPS L1 C/A signal generator for bladeRF. It combines a GPS signal model derived from gps-sdr-sim with a bladeRF synchronous TX loop. The program reads ephemeris and receiver motion inputs, generates 0.1 second SC16 I/Q blocks, queues them through an in-process FIFO, and transmits them to the bladeRF hardware.
+bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented production backend is GPS L1 C/A; the signal registry also defines the RF and code-domain parameters needed to add Galileo E1, BeiDou B1I, and GLONASS L1OF without conflating their distinct time systems, navigation formats, or carrier plans.
 
 ## Source Layout
 
@@ -10,6 +10,7 @@ bladeGPS is a real-time GPS L1 C/A signal generator for bladeRF. It combines a G
 | --- | --- |
 | `bladegps.c` | Command-line entry point for real-time bladeRF operation, automatic ephemeris download, FIFO utilities, TX thread, bladeRF setup, cleanup, and process lifecycle. |
 | `bladegps.h` | bladeGPS-specific constants, thread/FIFO state, simulator option state, bladeRF TX state, and cross-module declarations. |
+| `gnss.c` / `gnss.h` | Constellation and signal registry, RF/code profiles, profile parsing, capability status, and passband validation. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
@@ -46,7 +47,7 @@ bladegps.c main()
            +-- stream SC16_Q11 buffers through bladerf_sync_tx()
 ```
 
-The FIFO decouples GPS synthesis from hardware transmission. The GPS thread produces `NUM_IQ_SAMPLES` samples per block, while the TX thread consumes `SAMPLES_PER_BUFFER` samples per libbladeRF transfer.
+The FIFO decouples synthesis from hardware transmission. The producer generates `tx_sample_rate / 10` samples per 100 ms block, while the TX thread consumes `SAMPLES_PER_BUFFER` samples per libbladeRF transfer.
 
 ## Command-Line Lifecycle
 
@@ -79,10 +80,11 @@ When `-e` is omitted:
 3. `day_of_year()` maps the date to RINEX day-of-year.
 4. The target file name is `brdcDDD0.YYn`.
 5. Existing local files are reused.
-6. Missing files are downloaded from NOAA/NGS CORS:
+6. Missing files are downloaded from NOAA/NGS CORS, with BKG IGS used as a fallback:
 
 ```text
 https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz
 ```
 
 The downloader requires `curl` and `gzip`. It writes compressed and decompressed data to `.tmp` files first, verifies that those files exist, then renames them into place. On failure, temporary files are removed and the user is told to provide `-e <gps_nav>` manually.
@@ -95,7 +97,7 @@ The central runtime state is `sim_t` in `bladegps.h`.
 
 | Field | Purpose |
 | --- | --- |
-| `opt` | Parsed simulator options: nav file, motion file, duration, start time, static location, NMEA mode, interactive mode. |
+| `opt` | Parsed simulator options: signal profile, bladeRF device/RF settings, elevation mask, nav file, motion file, duration, start time, motion mode, and interactive mode. |
 | `tx` | bladeRF TX state: device handle, transfer buffer, TX thread, TX error flag. |
 | `gps` | GPS generation thread state and initialization condition variable. |
 | `finished` | Shared shutdown signal. |
@@ -141,18 +143,18 @@ Main responsibilities:
 
 ## FIFO Design
 
-Constants in `bladegps.h`:
+The generation block and FIFO sizes are runtime values derived from the selected sample rate:
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `TX_SAMPLERATE` | `2600000` | 2.6 Msps. |
-| `NUM_IQ_SAMPLES` | `TX_SAMPLERATE / 10` | Samples per 0.1 second generation block. |
-| `FIFO_LENGTH` | `NUM_IQ_SAMPLES * 2` | FIFO capacity in complex samples. |
+| `DEFAULT_TX_SAMPLERATE` | `2600000` | GPS default of 2.6 Msps. |
+| `sim_t.iq_block_samples` | `tx_sample_rate / 10` | Samples per 0.1 second generation block. |
+| `sim_t.fifo_length` | `iq_block_samples * 2` | FIFO capacity in complex samples. |
 | `SAMPLES_PER_BUFFER` | `32 * 1024` | Samples per bladeRF sync TX transfer. |
 
 Each sample is interleaved I/Q as two `int16_t` values.
 
-`get_sample_length()` computes available complex samples. `fifo_read()` copies from the ring buffer and handles wraparound. The GPS producer writes complete `NUM_IQ_SAMPLES` blocks and advances `head`.
+`get_sample_length()` computes available complex samples. `fifo_read()` copies from the ring buffer and handles wraparound. The producer writes complete `iq_block_samples` blocks and advances `head`.
 
 ## GPS Signal Pipeline
 
@@ -184,6 +186,7 @@ Supported modes:
 
 - Static LLH from `-l`.
 - CSV ECEF motion from `-u`.
+- CSV geodetic motion from `-p`.
 - NMEA GGA stream from `-g`.
 - Keyboard interactive motion from `-i`: `w/s/a/d` for horizontal movement and `e/q` for up/down.
 
@@ -233,7 +236,7 @@ Carrier sine/cosine values use 512-entry integer lookup tables.
 
 ## bladeRF Configuration
 
-`main()` configures the TX module with:
+`main()` configures the TX module from the selected signal profile and optional CLI overrides. The GPS defaults are:
 
 | Setting | Value |
 | --- | --- |
@@ -251,7 +254,7 @@ XB200 mode (`-x 200`) attaches the expansion board, selects custom TX/RX filter 
 The Makefile builds:
 
 ```text
-bladegps.o + gpssim.o + getch.o -> bladegps
+bladegps.o + gpssim.o + gnss.o + getch.o -> bladegps
 ```
 
 Dependency discovery:
@@ -300,10 +303,10 @@ bladeGPS can generate signals in a protected satellite navigation band. The soft
 
 - GPS L1 C/A only.
 - PRN support is limited to GPS PRN 1-32.
-- No GLONASS/Galileo/BeiDou generation.
+- Galileo E1, BeiDou B1I, and GLONASS L1OF are registered profiles but are deliberately rejected until their complete waveform/navigation/ephemeris backends pass the gates in `MULTI_GNSS.md`.
 - No integrity or ionospheric scenario editor.
 - No built-in almanac download.
-- Auto-download currently uses NOAA/NGS daily GPS broadcast navigation files.
+- Auto-download currently uses NOAA/NGS and BKG daily legacy GPS broadcast navigation files.
 - Hardware behavior depends on local bladeRF firmware, libbladeRF version, clocking, gain setup, and RF test environment.
 - The realtime path is tested by build/static analysis here; full RF validation requires hardware and shielded lab equipment.
 - See `GPS_L1_CA_COVERAGE.md` for a more detailed implementation and non-certified-area matrix.

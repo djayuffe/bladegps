@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adds a constellation/signal registry for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF, with explicit implementation status and passband validation.
+- Adds `-S`/`-L` signal-profile controls and runtime bladeRF device, frequency, sample-rate, bandwidth, gain, and elevation-mask options.
+- Keeps unsupported constellation profiles fail-closed until their waveform, navigation-message, ephemeris, and validation backends are complete.
+- Adds geodetic latitude/longitude/height motion CSV input through `-p`.
+- Derives generation-block and FIFO sizes from the selected runtime sample rate.
+- Rejects bladeRF sample-rate coercion so hardware and synthesized code/carrier timing cannot diverge.
+- Adds the BKG IGS archive as a fallback for automatic legacy GPS broadcast-ephemeris downloads.
+- Documents the multi-GNSS architecture, band-planning constraints, backend requirements, and acceptance gates.
 - Selects the closest in-fit ephemeris independently for each satellite and refreshes it at navigation-frame boundaries.
 - Replaces linear light-time extrapolation with an iterative transmit-time and exact Earth-rotation solution.
 - Adds relativistic satellite-clock drift to range-rate modeling.

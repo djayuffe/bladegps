@@ -97,6 +97,35 @@ static void test_ephemeris_selection(void)
 	assert(selectEphemerides(selected, source, 2, now) == 0);
 }
 
+static void test_signal_profiles(void)
+{
+	gnss_signal_t signal;
+	const gnss_signal_profile_t *profile;
+
+	assert(gnss_signal_parse("gps-l1ca", &signal) == 0);
+	assert(signal == GNSS_SIGNAL_GPS_L1CA);
+	profile = gnss_signal_profile(signal);
+	assert(profile != NULL && profile->waveform_implemented == 1);
+	assert(gnss_signal_parse("galileo-e1", &signal) == 0);
+	assert(gnss_signal_profile(signal)->system == GNSS_SYSTEM_GALILEO);
+	assert(gnss_signal_parse("invalid", &signal) == -1);
+	assert(gnss_frequency_fits(1575.42e6, 5.0e6, 1575.42e6, 4.0e6));
+	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
+}
+
+static void test_llh_motion(void)
+{
+	double storage[2][3];
+	double *rows[2] = {storage[0], storage[1]};
+	double llh[3];
+
+	assert(readLlhMotion(rows, "tests/llh_motion.csv") == 2);
+	xyz2llh(rows[0], llh);
+	assert(fabs(llh[0]*R2D - 59.3293) < 1.0e-7);
+	assert(fabs(llh[1]*R2D - 18.0686) < 1.0e-7);
+	assert(fabs(llh[2] - 30.0) < 1.0e-3);
+}
+
 #ifndef _WIN32
 static void test_compressed_rinex_sample(void)
 {
@@ -121,6 +150,8 @@ int main(void)
 	test_coordinate_round_trip();
 	test_ca_code_balance();
 	test_ephemeris_selection();
+	test_signal_profiles();
+	test_llh_motion();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif
