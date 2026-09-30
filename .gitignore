@@ -46,3 +46,10 @@ Temporary Items
 *.o
 *.swp
 bladegps
+
+# Auto-downloaded broadcast ephemeris cache files.
+# Existing tracked sample RINEX files remain in the repository.
+brdc[0-9][0-9][0-9]0.[0-9][0-9]n
+brdc[0-9][0-9][0-9]0.[0-9][0-9]n.gz
+brdc[0-9][0-9][0-9]0.[0-9][0-9]n.tmp
+brdc[0-9][0-9][0-9]0.[0-9][0-9]n.gz.tmp

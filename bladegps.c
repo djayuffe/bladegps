@@ -77,6 +77,28 @@ static int file_exists(const char *path)
 	return path != NULL && stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+static int run_command(const char *cmd, const char *description)
+{
+	int status;
+
+	status = system(cmd);
+	if (status != 0) {
+		fprintf(stderr, "ERROR: Failed to %s.\n", description);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int append_dependency_check(char *cmd, size_t cmd_size, const char *tool)
+{
+#ifdef _WIN32
+	return snprintf(cmd, cmd_size, "where %s >nul 2>nul", tool) < (int)cmd_size ? 0 : -1;
+#else
+	return snprintf(cmd, cmd_size, "command -v %s >/dev/null 2>&1", tool) < (int)cmd_size ? 0 : -1;
+#endif
+}
+
 static int is_leap_year(int year)
 {
 	return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
@@ -137,9 +159,10 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	int yy;
 	char out_path[MAX_CHAR];
 	char gz_path[MAX_CHAR];
+	char tmp_gz_path[MAX_CHAR + 8];
+	char tmp_out_path[MAX_CHAR + 8];
 	char url[256];
 	char cmd[768];
-	int status;
 
 	doy = day_of_year(date);
 	if (doy < 1)
@@ -155,6 +178,10 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 		printf("Using existing broadcast ephemeris: %s\n", out_path);
 		return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
 	}
+	if (snprintf(tmp_gz_path, sizeof(tmp_gz_path), "%s.tmp", gz_path) >= (int)sizeof(tmp_gz_path))
+		return -1;
+	if (snprintf(tmp_out_path, sizeof(tmp_out_path), "%s.tmp", out_path) >= (int)sizeof(tmp_out_path))
+		return -1;
 
 	if (snprintf(url, sizeof(url),
 		"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
@@ -162,20 +189,58 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 		return -1;
 
 	printf("Downloading broadcast ephemeris: %s\n", url);
-	if (snprintf(cmd, sizeof(cmd), "curl -fL --retry 2 --connect-timeout 15 -o '%s' '%s'", gz_path, url) >= (int)sizeof(cmd))
+	remove(tmp_gz_path);
+	remove(tmp_out_path);
+
+	if (append_dependency_check(cmd, sizeof(cmd), "curl") != 0)
 		return -1;
-	status = system(cmd);
-	if (status != 0)
+	if (run_command(cmd, "find curl in PATH") != 0)
 		return -1;
 
-	if (snprintf(cmd, sizeof(cmd), "gzip -cd '%s' > '%s'", gz_path, out_path) >= (int)sizeof(cmd))
+	if (append_dependency_check(cmd, sizeof(cmd), "gzip") != 0)
 		return -1;
-	status = system(cmd);
-	if (status != 0)
+	if (run_command(cmd, "find gzip in PATH") != 0)
 		return -1;
+
+	if (snprintf(cmd, sizeof(cmd), "curl -fL --retry 2 --connect-timeout 15 -o \"%s\" \"%s\"", tmp_gz_path, url) >= (int)sizeof(cmd))
+		return -1;
+	if (run_command(cmd, "download broadcast ephemeris") != 0)
+		goto fail;
+
+	if (!file_exists(tmp_gz_path)) {
+		fprintf(stderr, "ERROR: Download did not create %s.\n", tmp_gz_path);
+		goto fail;
+	}
+
+	if (snprintf(cmd, sizeof(cmd), "gzip -cd \"%s\" > \"%s\"", tmp_gz_path, tmp_out_path) >= (int)sizeof(cmd))
+		goto fail;
+	if (run_command(cmd, "decompress broadcast ephemeris") != 0)
+		goto fail;
+
+	if (!file_exists(tmp_out_path)) {
+		fprintf(stderr, "ERROR: Decompression did not create %s.\n", tmp_out_path);
+		goto fail;
+	}
+
+	remove(gz_path);
+	if (rename(tmp_gz_path, gz_path) != 0) {
+		fprintf(stderr, "ERROR: Failed to save %s.\n", gz_path);
+		goto fail;
+	}
+
+	remove(out_path);
+	if (rename(tmp_out_path, out_path) != 0) {
+		fprintf(stderr, "ERROR: Failed to save %s.\n", out_path);
+		goto fail;
+	}
 
 	printf("Saved broadcast ephemeris: %s\n", out_path);
 	return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
+
+fail:
+	remove(tmp_gz_path);
+	remove(tmp_out_path);
+	return -1;
 }
 
 void init_sim(sim_t *s)

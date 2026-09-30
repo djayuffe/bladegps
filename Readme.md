@@ -82,6 +82,8 @@ Automatic ephemeris download example:
 
 When `-e` is omitted, bladeGPS downloads the daily GPS broadcast ephemeris from NOAA/NGS CORS using the `-t` scenario date if provided, otherwise the current UTC date. The downloaded file is saved as `brdcDDD0.YYn` in the working directory and reused on later runs.
 
+The downloader writes to temporary `.tmp` files first, verifies that both the compressed and decompressed files were created, then renames them into place. Failed downloads or decompression errors clean up partial output and print a manual `-e <gps_nav>` fallback hint.
+
 User motion CSV example:
 
 ```sh
@@ -120,6 +122,11 @@ time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
 - If `-e` is omitted, the downloader fetches NOAA/NGS CORS RINEX v2 daily GPS navigation data from `https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz`.
+- Auto-downloaded ephemeris cache files are ignored by git so local runs do not dirty the repository.
+
+## Release history
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Safety
 
