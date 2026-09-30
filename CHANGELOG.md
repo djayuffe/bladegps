@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Adds typed RINEX 3/4 navigation ingestion for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA records.
+- Preserves blank RINEX fields and skips unrelated RINEX 4 STO/ION/EOP and unsupported ephemeris message blocks without losing record synchronization.
+- Adds Galileo/BeiDou broadcast-Kepler propagation, including BeiDou GEO's ICD-defined tilted-frame transform and constellation clock/relativity models.
+- Adds GLONASS FDMA state-vector propagation with RK4 integration, J2, Earth rotation, and broadcast luni-solar accelerations.
+- Adds Galileo CRC-24Q, rate-1/2 constraint-length-7 convolutional coding with the inverted G2 branch, and block interleaving.
+- Adds BeiDou BCH(15,11,1) systematic encoding and two-codeword bit interleaving.
 - Adds ICD-derived BeiDou B1I ranging-code generation for all 63 published phase assignments.
 - Adds the GLONASS L1OF 511-chip ranging code and standard FDMA slot-to-carrier mapping.
 - Adds all 50 official Galileo E1-B and all 50 E1-C 4092-chip primary memory codes, hexadecimal decoding, and exact CBOC subcarrier primitives.

@@ -186,6 +186,8 @@ Selecting a planned profile returns an error. This prevents an unsupported const
 
 The source tree already contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping. These primitives do not change a profile to `implemented`: a transmit backend also requires complete navigation messages, constellation-specific ephemeris/time handling, channel mixing, and independent receiver validation.
 
+The multi-GNSS foundation also includes a typed RINEX 3/4 reader and tested Galileo/BeiDou Keplerian, BeiDou GEO, and GLONASS state-vector propagation models. They remain isolated from RF output until navigation-message encoding and the multi-constellation channel mixer are complete.
+
 ## Implementation notes
 
 - The simulator generates 0.1 second blocks at the selected sample rate for bladeRF SC16 transmission; GPS defaults to 2.6 Msps.

@@ -10,10 +10,10 @@ Only `gps-l1ca` has a production waveform backend. The other profiles are intent
 | --- | --- | --- | --- | --- |
 | Signal/RF profile | Implemented | Implemented | Implemented | Implemented |
 | Passband validation | Implemented | Implemented | Implemented | Profile check implemented; per-satellite slot mixer pending |
-| Broadcast ephemeris parser | RINEX 2 GPS | Not implemented | Not implemented | Not implemented |
-| Orbit/clock model | Implemented | Not implemented | Not implemented | Not implemented |
+| Broadcast ephemeris parser | RINEX 2 production path; typed RINEX 3/4 LNAV reader added | Typed RINEX 3/4 INAV/FNAV reader added | Typed RINEX 3/4 D1/D2 reader added | Typed RINEX 3/4 FDMA reader added |
+| Orbit/clock model | Implemented | Broadcast Kepler/clock/relativity model added; channel integration pending | MEO/IGSO and GEO broadcast models added; channel integration pending | RK4 state-vector/J2/Earth-rotation model added; channel integration pending |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
-| Navigation message | GPS LNAV | Not implemented | Not implemented | Not implemented |
+| Navigation message | GPS LNAV | CRC-24Q, convolutional coding, and block interleaving implemented; I/NAV word/page packing pending | BCH(15,11,1) and word interleaving implemented; D1/D2 field/page packing pending | Ranging/time-mark primitives implemented; GNAV string field/Hamming packing pending |
 | Modulation/mixer | BPSK(1) | CBOC subcarrier primitive implemented; channel mixer pending | BPSK primitive pending channel integration | FDMA carrier mapping implemented; channel mixer pending |
 | Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
 

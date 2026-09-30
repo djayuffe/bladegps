@@ -190,6 +190,44 @@ static void test_multi_gnss_codes(void)
 	assert(fabs(pilot[0] - (sqrt(10.0/11.0) - sqrt(1.0/11.0))) < 1.0e-14);
 }
 
+static void test_multi_gnss_fec(void)
+{
+	static const uint8_t convolution_input[10] = {1,0,1,1,0,0,0,0,0,0};
+	static const uint8_t convolution_expected[20] = {
+		1,0,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,0,1,0
+	};
+	static const uint8_t bch_input[11] = {1,0,1,1,0,0,1,0,1,0,1};
+	static const uint8_t bch_expected[15] = {1,0,1,1,0,0,1,0,1,0,1,0,0,1,0};
+	static const char check_text[] = "123456789";
+	uint8_t check_bits[72];
+	uint8_t encoded[20];
+	uint8_t codeword[15];
+	uint8_t interleaved[30];
+	uint8_t matrix_input[240];
+	uint8_t matrix_output[240];
+	size_t byte, bit;
+
+	for (byte = 0; byte < 9U; byte++)
+		for (bit = 0; bit < 8U; bit++)
+			check_bits[byte*8U+bit] = (uint8_t)
+				(((unsigned char)check_text[byte] >> (7U-bit)) & 1U);
+	assert(gnss_crc24q_bits(check_bits, 72) == UINT32_C(0xcde703));
+	assert(gnss_galileo_convolutional_encode(convolution_input, 10, encoded, 20) == 0);
+	assert(memcmp(encoded, convolution_expected, sizeof(encoded)) == 0);
+	assert(gnss_beidou_bch15_11(bch_input, codeword) == 0);
+	assert(memcmp(codeword, bch_expected, sizeof(codeword)) == 0);
+	assert(gnss_beidou_interleave_2x15(codeword, bch_expected, interleaved) == 0);
+	for (bit = 0; bit < 15U; bit++) {
+		assert(interleaved[bit*2U] == codeword[bit]);
+		assert(interleaved[bit*2U+1U] == bch_expected[bit]);
+	}
+	for (bit = 0; bit < 240U; bit++)
+		matrix_input[bit] = (uint8_t)(bit & 1U);
+	assert(gnss_block_interleave(matrix_input, 30, 8, matrix_output, 240) == 0);
+	for (bit = 0; bit < 240U; bit++)
+		assert(matrix_output[(bit % 8U)*30U + bit/8U] == matrix_input[bit]);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -201,6 +239,56 @@ static void test_llh_motion(void)
 	assert(fabs(llh[0]*R2D - 59.3293) < 1.0e-7);
 	assert(fabs(llh[1]*R2D - 18.0686) < 1.0e-7);
 	assert(fabs(llh[2] - 30.0) < 1.0e-3);
+}
+
+static void test_rinex4_mixed_navigation(void)
+{
+	gnss_nav_record_t records[4];
+	size_t count = 0;
+	double position[3];
+	double velocity[3];
+	double clock_bias;
+	double clock_drift;
+	double radius;
+
+	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", records, 4, &count) == 0);
+	assert(count == 3);
+	assert(records[0].system == GNSS_SYSTEM_GALILEO && records[0].prn == 12);
+	assert(strcmp(records[0].message, "INAV") == 0);
+	assert(records[0].model == GNSS_NAV_KEPLERIAN && records[0].orbit_count == 28);
+	assert(fabs(records[0].orbit[7] - 5440.609727859) < 1.0e-9);
+	assert(isnan(records[0].orbit[25]) && isnan(records[0].orbit[26]) && isnan(records[0].orbit[27]));
+	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
+	assert(strcmp(records[1].message, "D1") == 0);
+	assert(isnan(records[1].orbit[17]) && records[1].orbit[18] == 809.0);
+	assert(records[2].system == GNSS_SYSTEM_GLONASS && records[2].prn == 1);
+	assert(strcmp(records[2].message, "FDMA") == 0);
+	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
+	assert(fabs(records[2].orbit[0] + 13904.48925781) < 1.0e-7);
+	assert(records[2].orbit[14] == 2.0);
+	assert(gnss_propagate_kepler(&records[0], records[0].orbit[8], position,
+		velocity, &clock_bias, &clock_drift) == 0);
+	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);
+	assert(radius > 2.0e7 && radius < 4.0e7);
+	assert(isfinite(clock_bias) && isfinite(clock_drift));
+	assert(gnss_propagate_kepler(&records[1], records[1].orbit[8] + 60.0, position,
+		velocity, &clock_bias, &clock_drift) == 0);
+	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);
+	assert(radius > 2.0e7 && radius < 5.0e7);
+	strcpy(records[1].message, "D2");
+	assert(gnss_propagate_kepler(&records[1], records[1].orbit[8] + 60.0, position,
+		velocity, &clock_bias, &clock_drift) == 0);
+	assert(isfinite(position[0]) && isfinite(position[1]) && isfinite(position[2]));
+	assert(gnss_propagate_glonass(&records[2], 0.0, position, velocity,
+		&clock_bias, &clock_drift) == 0);
+	assert(fabs(position[0] + 13904489.25781) < 1.0e-5);
+	assert(fabs(velocity[0] - 2552.483558655) < 1.0e-9);
+	assert(gnss_propagate_glonass(&records[2], 60.0, position, velocity,
+		&clock_bias, &clock_drift) == 0);
+	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);
+	assert(radius > 2.0e7 && radius < 3.0e7);
+	assert(isfinite(clock_bias) && isfinite(clock_drift));
+	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", records, 2, &count) == -1);
 }
 
 #ifndef _WIN32
@@ -229,7 +317,9 @@ int main(void)
 	test_ephemeris_selection();
 	test_signal_profiles();
 	test_multi_gnss_codes();
+	test_multi_gnss_fec();
 	test_llh_motion();
+	test_rinex4_mixed_navigation();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif
