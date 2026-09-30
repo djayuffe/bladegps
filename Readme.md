@@ -12,9 +12,15 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Dynamic receiver mode from NMEA GGA streams.
 - Optional keyboard-controlled interactive motion mode.
 - RINEX broadcast navigation file parsing.
+- Direct POSIX streaming of plain, `.gz`, and legacy Unix-compressed `.Z` RINEX 2 files.
+- Per-satellite ephemeris selection and seamless 30-second ephemeris refresh.
+- Iterative signal transit-time and Earth-rotation (Sagnac) correction.
+- Satellite clock bias, relativistic correction, TGD, and clock-drift modeling.
 - Automatic daily GPS broadcast ephemeris download when `-e` is omitted.
 - Real-time SC16 I/Q streaming to bladeRF.
 - Optional XB200 setup for GPS-band transmit filtering/path selection.
+- Graceful generator/TX error propagation and `SIGINT`/`SIGTERM` shutdown.
+- Deterministic core tests for time, coordinates, C/A code, and ephemeris selection.
 - Portable Makefile that uses `pkg-config libbladeRF` when available, with the original adjacent bladeRF source-tree fallback.
 
 ## Requirements
@@ -32,6 +38,12 @@ On macOS with MacPorts, for example, the build can use libbladeRF from `/opt/loc
 
 ```sh
 make
+```
+
+Run the non-RF core-model checks with:
+
+```sh
+make check
 ```
 
 If libbladeRF is not discoverable through `pkg-config`, the Makefile falls back to the historical layout:
@@ -112,7 +124,7 @@ In interactive mode, `w/s/a/d` move north/south/west/east and `e/q` move up/down
 
 ## Input files
 
-- `brdc*.??n` files are RINEX broadcast navigation files.
+- `brdc*.??n`, `brdc*.??n.gz`, and `brdc*.??n.Z` files are RINEX 2 broadcast navigation files. Compressed input is streamed through `gzip` on POSIX without constructing a shell command.
 - `circle.csv`, `satellite.csv`, and `ss520-4.csv` are sample motion/position data files.
 - `run_bladerfGPS.sh` is a convenience script retained from the original project.
 
@@ -122,9 +134,16 @@ User motion CSV rows use:
 time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 ```
 
+Records are consumed at 10 Hz. All four CSV fields must be finite numbers;
+malformed records are rejected instead of silently shortening the scenario.
+NMEA input accepts valid GGA fixes and ignores no-fix records.
+
 ## Implementation notes
 
 - The simulator generates 0.1 second blocks at 2.6 Msps for bladeRF SC16 transmission.
+- The requested duration emits the complete number of 100 ms blocks.
+- The closest in-fit broadcast record is selected independently per PRN and refreshed at navigation-frame boundaries.
+- Ephemeris handovers rebuild LNAV data while preserving range-rate continuity.
 - FIFO access between the GPS generation thread and TX thread is protected with the GPS mutex.
 - Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.

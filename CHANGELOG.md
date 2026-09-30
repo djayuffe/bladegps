@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Selects the closest in-fit ephemeris independently for each satellite and refreshes it at navigation-frame boundaries.
+- Replaces linear light-time extrapolation with an iterative transmit-time and exact Earth-rotation solution.
+- Adds relativistic satellite-clock drift to range-rate modeling.
+- Preserves Doppler continuity across IODE/IODC/TOE ephemeris handovers.
+- Corrects 30-second navigation-frame alignment and bounds code phase across the full word buffer.
+- Emits the complete requested number of 100 ms blocks.
+- Transmits the exact final partial buffer instead of discarding the scenario tail.
+- Fixes dynamic-motion LLH initialization and refreshes interactive local axes while moving.
+- Replaces 864,000 small motion allocations with contiguous storage.
+- Validates RINEX 2 headers, orbital parameters, motion numbers, and Gregorian century dates.
+- Reads RINEX fit intervals and streams `.gz`/`.Z` navigation files safely on POSIX.
+- Propagates generator failures to the process exit code and handles SIGINT/SIGTERM cleanly.
+- Adds deterministic core-model regression tests through `make check`.
+
 ## v1.0.0
 
 - Added automatic NOAA/NGS GPS broadcast ephemeris download when `-e` is omitted.

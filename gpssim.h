@@ -79,6 +79,9 @@
 
 #define EPHEM_ARRAY_SIZE (13) // for daily GPS broadcast ephemers file (brdc)
 
+/*! \brief Default legacy GPS LNAV fit interval when RINEX omits it. */
+#define DEFAULT_EPHEMERIS_FIT_HOURS (4.0)
+
 /*! \brief Structure representing GPS time */
 typedef struct
 {
@@ -127,6 +130,7 @@ typedef struct
 	double tgd;	/*!< Group delay L2 bias */
 	double sv_accuracy; /*!< SV accuracy from RINEX navigation record */
 	int sv_health;	/*!< SV health from RINEX navigation record */
+	double fit_interval; /*!< Broadcast ephemeris fit interval in hours */
 	// Working variables follow
 	double n; 	/*!< Mean motion (Average angular velocity) */
 	double sq1e2;	/*!< sqrt(1-e^2) */
@@ -166,5 +170,15 @@ typedef struct
 } channel_t;
 
 void date2gps(const datetime_t *t, gpstime_t *g);
+void gps2date(const gpstime_t *g, datetime_t *t);
+void llh2xyz(const double *llh, double *xyz);
+void xyz2llh(const double *xyz, double *llh);
+void codegen(int *ca, int prn);
+unsigned long computeChecksum(unsigned long source, int nib);
+double subGpsTime(gpstime_t g1, gpstime_t g0);
+void normalizeGpsTime(gpstime_t *g);
+int selectEphemerides(ephem_t selected[MAX_SAT],
+	const ephem_t source[][MAX_SAT], int count, gpstime_t time);
+int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname);
 
 #endif

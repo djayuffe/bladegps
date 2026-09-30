@@ -3,6 +3,7 @@
 #include "bladegps.h"
 #include <errno.h>
 #include <math.h>
+#include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
 
@@ -13,6 +14,19 @@
 #else
 #include <unistd.h>
 #endif
+
+static volatile sig_atomic_t stop_requested = 0;
+
+static void request_stop(int signal_number)
+{
+	(void)signal_number;
+	stop_requested = 1;
+}
+
+int stop_was_requested(void)
+{
+	return stop_requested != 0;
+}
 
 static int copy_option(char *dst, size_t dst_size, const char *src, const char *name)
 {
@@ -246,15 +260,18 @@ fail:
 void init_sim(sim_t *s)
 {
 	s->tx.dev = NULL;
+	s->tx.buffer = NULL;
 	pthread_mutex_init(&(s->tx.lock), NULL);
 	s->tx.error = 0;
 
 	pthread_mutex_init(&(s->gps.lock), NULL);
-	//s->gps.error = 0;
+	s->gps.error = 0;
 	s->gps.ready = 0;
 	pthread_cond_init(&(s->gps.initialization_done), NULL);
 
 	s->status = 0;
+	s->finished = false;
+	s->fifo = NULL;
 	s->head = 0;
 	s->tail = 0;
 	s->sample_length = 0;
@@ -331,6 +348,7 @@ void *tx_task(void *arg)
 	while (1) {
 		int16_t *tx_buffer_current = s->tx.buffer;
 		unsigned int buffer_samples_remaining = SAMPLES_PER_BUFFER;
+		unsigned int samples_to_send;
 
 		while (buffer_samples_remaining > 0) {
 			
@@ -341,7 +359,9 @@ void *tx_task(void *arg)
 			}
 			if (get_sample_length(s) == 0 && is_finished_generation(s)) {
 				pthread_mutex_unlock(&(s->gps.lock));
-				goto out;
+				if (buffer_samples_remaining == SAMPLES_PER_BUFFER)
+					goto out;
+				break;
 			}
 //			assert(get_sample_length(s) > 0);
 
@@ -369,8 +389,9 @@ void *tx_task(void *arg)
 			tx_buffer_current += (2 * samples_populated);
 		}
 
-		// If there were no errors, transmit the data buffer.
-		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER, NULL, TIMEOUT_MS);
+		// Transmit a full buffer, or the exact final partial buffer at EOF.
+		samples_to_send = SAMPLES_PER_BUFFER - buffer_samples_remaining;
+		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, samples_to_send, NULL, TIMEOUT_MS);
 		if (status != 0) {
 			fprintf(stderr, "TX stream failed: %s\n", bladerf_strerror(status));
 			s->tx.error = status;
@@ -381,18 +402,8 @@ void *tx_task(void *arg)
 			pthread_mutex_unlock(&(s->gps.lock));
 			goto out;
 		}
-		if (is_fifo_write_ready(s)) {
-			/*
-			printf("\rTime = %4.1f", s->time);
-			s->time += 0.1;
-			fflush(stdout);
-			*/
-		}
-		else if (is_finished_generation(s))
-		{
+		if (samples_to_send < SAMPLES_PER_BUFFER)
 			goto out;
-		}
-
 	}
 out:
 	return NULL;
@@ -447,6 +458,10 @@ int main(int argc, char *argv[])
 	datetime_t t0;
 	datetime_t navdate;
 	int navdate_set = 0;
+	void (*previous_sigint)(int);
+#ifdef SIGTERM
+	void (*previous_sigterm)(int);
+#endif
 
 	if (argc<3)
 	{
@@ -503,7 +518,7 @@ int main(int argc, char *argv[])
 				printf("ERROR: Invalid date and time.\n");
 				exit(1);
 			}
-			if (t0.y<=1980 || t0.m<1 || t0.m>12 || t0.d<1 || t0.d>31 ||
+			if (t0.y<=1980 || day_of_year(&t0) < 1 ||
 				t0.hh<0 || t0.hh>23 || t0.mm<0 || t0.mm>59 || t0.sec<0.0 || t0.sec>=60.0)
 			{
 				printf("ERROR: Invalid date and time.\n");
@@ -558,6 +573,10 @@ int main(int argc, char *argv[])
 
 	// Initialize simulator
 	init_sim(&s);
+	previous_sigint = signal(SIGINT, request_stop);
+#ifdef SIGTERM
+	previous_sigterm = signal(SIGTERM, request_stop);
+#endif
 
 	// Allocate TX buffer to hold each block of samples to transmit.
 	s.tx.buffer = (int16_t *)malloc(SAMPLES_PER_BUFFER * sizeof(int16_t) * 2); // for 16-bit I and Q samples
@@ -733,12 +752,14 @@ int main(int argc, char *argv[])
 	printf("Running...\n");
 	printf("Press 'Ctrl+C' to abort.\n");
 
-	// Wainting for TX task to complete.
+	// Wait for the TX task to complete.
 	pthread_join(s.tx.thread, NULL);
-	if (s.tx.error == 0)
+	if (stop_was_requested())
+		printf("\nStopped by user.\n");
+	else if (s.tx.error == 0 && s.gps.error == 0)
 		printf("\nDone!\n");
 	else
-		printf("\nAborted after TX stream error.\n");
+		printf("\nAborted after signal-generation or TX error.\n");
 
 	// Disable TX module and shut down underlying TX stream.
 	s.status = bladerf_enable_module(s.tx.dev, BLADERF_MODULE_TX, false);
@@ -748,7 +769,8 @@ int main(int argc, char *argv[])
 
 	pthread_join(s.gps.thread, NULL);
 	gps_started = 0;
-	exit_code = s.tx.error == 0 ? 0 : 1;
+	exit_code = stop_was_requested() ? 130 :
+		((s.tx.error == 0 && s.gps.error == 0) ? 0 : 1);
 
 out:
 	if (gps_started) {
@@ -780,6 +802,18 @@ out:
 		printf("Closing device...\n");
 		bladerf_close(s.tx.dev);
 	}
+
+	pthread_cond_destroy(&(s.fifo_read_ready));
+	pthread_cond_destroy(&(s.fifo_write_ready));
+	pthread_cond_destroy(&(s.gps.initialization_done));
+	pthread_mutex_destroy(&(s.gps.lock));
+	pthread_mutex_destroy(&(s.tx.lock));
+	if (previous_sigint != SIG_ERR)
+		signal(SIGINT, previous_sigint);
+#ifdef SIGTERM
+	if (previous_sigterm != SIG_ERR)
+		signal(SIGTERM, previous_sigterm);
+#endif
 
 	return(exit_code);
 }

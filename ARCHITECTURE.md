@@ -134,6 +134,7 @@ Main responsibilities:
 - Wait until FIFO data is available or generation is finished.
 - Copy enough samples into `tx.buffer`.
 - Call `bladerf_sync_tx()` with `SAMPLES_PER_BUFFER`.
+- Submit the exact final partial buffer instead of dropping the tail of a scenario.
 - On TX error, set `tx.error`, set `finished`, broadcast FIFO condition variables, and exit.
 
 `main()` joins the TX thread first during normal completion, then disables TX and joins the GPS thread.
@@ -161,13 +162,21 @@ Most signal logic is in `gpssim.c`.
 
 `readRinexNavAll()` parses RINEX broadcast navigation records into `ephem_t eph[EPHEM_ARRAY_SIZE][MAX_SAT]`. It:
 
-- Skips the RINEX header.
+- Validates and skips the RINEX 2 header.
 - Groups ephemerides into time sets.
 - Validates line length before fixed-column access.
 - Bounds-checks PRN before indexing `eph`.
+- Rejects non-finite or physically invalid orbital records.
 - Parses SV health and accuracy fields.
 - Converts RINEX `D` exponent designators to `E`.
+- Streams `.gz` and legacy `.Z` input through a shell-free POSIX `gzip` child process.
+- Reads each record's fit interval, defaulting to four hours when omitted.
 - Precomputes orbital working values such as semi-major axis and mean motion.
+
+`selectEphemerides()` chooses the nearest in-fit record independently for every
+PRN. Selection is refreshed on each 30-second navigation-message boundary.
+When IODE, IODC, or TOE changes, channel subframes are rebuilt and the previous
+range is reevaluated with the new orbit to prevent a false Doppler step.
 
 ### Receiver Motion
 
@@ -184,12 +193,17 @@ Static LLH is converted through `llh2xyz()`. NMEA GGA is parsed into LLH and the
 time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 ```
 
+The row-pointer table and ECEF samples use one contiguous allocation, avoiding
+hundreds of thousands of small allocations in a 24-hour scenario. Dynamic ECEF
+input is converted back to LLH for status output and interactive local-axis
+motion. The local tangent frame is refreshed while the receiver moves.
+
 ### Satellite Geometry
 
 Important functions:
 
-- `satpos()` computes satellite position, velocity, and clock correction.
-- `computeRange()` computes geometric distance, pseudorange, range rate, azimuth, and elevation.
+- `satpos()` computes satellite position, velocity, clock bias, relativistic correction, TGD, and clock drift with week-aware time differences.
+- `computeRange()` iterates signal transmit time, applies exact Earth-rotation correction, and computes geometric distance, pseudorange, range rate, azimuth, and elevation.
 - `checkSatVisibility()` rejects unhealthy satellites and applies the elevation mask using the same Sagnac-aware range path as pseudorange generation.
 - `allocateChannel()` assigns healthy visible satellites to simulated channels.
 
@@ -210,6 +224,10 @@ For each 0.1 second step:
 3. For each sample, accumulate each channel's data bit, C/A code chip, and carrier table values.
 4. Store interleaved I/Q samples in `iq_buff`.
 5. Write the block into the FIFO for TX.
+
+The loop emits exactly the requested number of 100 ms blocks. Carrier Doppler
+is derived from consecutive pseudoranges so receiver and satellite motion are
+both represented. Signed I/Q scaling uses symmetric rounding.
 
 Carrier sine/cosine values use 512-entry integer lookup tables.
 
@@ -254,6 +272,7 @@ The source can also be built with explicit `BLADERF_CFLAGS` and `BLADERF_LIBS`.
 - Windows compatibility files are retained (`getopt.c`, `getopt.h`, `conio.h` paths).
 - POSIX interactive keyboard mode uses `getch.c`.
 - Automatic ephemeris download uses external `curl` and `gzip` commands.
+- Compressed RINEX input uses `fork`/`exec` on POSIX; Windows currently requires a decompressed navigation file.
 - The command construction assumes generated file names only, not arbitrary user-controlled download paths.
 
 ## Error Handling Strategy
@@ -268,7 +287,9 @@ The current code favors clear failure over partial or silent operation:
 - Unhealthy satellites from RINEX navigation records are not allocated to channels.
 - GPS receiver time is normalized across week boundaries during long simulations.
 - GPS initialization failure wakes waiting threads.
+- GPS generation failures propagate through `gps.error` and return non-zero.
 - TX stream errors stop generation, wake the GPS producer if it is waiting for FIFO space, and return non-zero.
+- `SIGINT` and `SIGTERM` set an async-signal-safe flag; generation stops at a block boundary, buffered TX drains, and the process returns status 130.
 - Download failures clean temporary files and suggest manual `-e`.
 
 ## Safety Model

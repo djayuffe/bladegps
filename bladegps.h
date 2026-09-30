@@ -69,7 +69,7 @@ typedef struct {
 typedef struct {
 	pthread_t thread;
 	pthread_mutex_t lock;
-	//int error;
+	int error;
 
 	int ready;
 	pthread_cond_t initialization_done;
@@ -95,5 +95,6 @@ typedef struct {
 
 extern void *gps_task(void *arg);
 extern int is_fifo_write_ready(sim_t *s);
+extern int stop_was_requested(void);
 
 #endif

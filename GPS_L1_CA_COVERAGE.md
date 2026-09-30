@@ -10,11 +10,16 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - 50 bps navigation-data timing through 20 C/A-code epochs per data bit.
 - 30-bit navigation words and subframe buffers.
 - Broadcast ephemeris parsing from RINEX navigation files.
+- Plain, `.gz`, and legacy `.Z` RINEX 2 input on POSIX.
 - RINEX SV health and accuracy parsing.
 - Unhealthy-satellite exclusion during visibility/channel allocation.
 - URA index propagation into subframe 1 from RINEX SV accuracy.
 - Navigation message generation from broadcast ephemeris.
 - Satellite ECEF position, velocity, clock correction, range, range-rate, azimuth, and elevation calculations.
+- Iterative transmit-time solution with exact Earth-rotation correction.
+- Satellite-clock drift and relativistic drift contribution to modeled range rate.
+- Per-PRN closest-valid ephemeris selection with a bounded four-hour fit window.
+- Navigation-subframe refresh on IODE/IODC/TOE handover without artificial Doppler discontinuity.
 - GPS week-normalized receiver time and code-phase timing.
 - Receiver motion from static LLH, ECEF CSV, NMEA GGA, or interactive keyboard motion.
 - Dynamic channel allocation for healthy visible satellites above the configured elevation mask.
@@ -34,6 +39,19 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - Satellite visibility now uses the same range/azimuth/elevation path as pseudorange generation.
 - Channel allocation now respects its elevation-mask argument.
 - Receiver time and code phase are normalized across GPS week boundaries.
+- Gregorian century handling is correct for GPS/calendar conversion.
+- Requested duration emits the full number of 100 ms signal blocks.
+- The TX consumer submits the final partial libbladeRF buffer, preserving the generated tail.
+- Motion storage is contiguous and malformed/non-finite CSV records are rejected.
+- Dynamic motion initializes LLH/local axes correctly; interactive local axes track movement.
+- User interrupts drain buffered output and return an interrupted exit status.
+
+## Automated Core Checks
+
+`make check` covers GPS epoch and century behavior, week normalization,
+LLH/ECEF round trips, C/A-code balance, per-satellite ephemeris selection, and
+the bundled compressed RINEX sample.
+The tests are deterministic and do not transmit RF.
 
 ## Known Non-Certified Areas
 
@@ -59,6 +77,7 @@ cc -O3 -Wall -I/opt/local/include -c gpssim.c -o /tmp/gpssim.o
 cc -O3 -Wall -I/opt/local/include -c getch.c -o /tmp/getch.o
 cc /tmp/bladegps.o /tmp/gpssim.o /tmp/getch.o -lm -lpthread -L/opt/local/lib -lbladeRF -o /tmp/bladegps
 clang --analyze -Xanalyzer -analyzer-output=text -I/opt/local/include bladegps.c gpssim.c getch.c
+make check
 git diff --check
 ```
 
@@ -72,5 +91,5 @@ Then perform shielded RF validation with a GPS receiver or simulator test set:
 
 ## Reference Documents
 
-- IS-GPS-200, current public GPS space segment/user segment interface specification.
+- [IS-GPS-200N](https://www.navcen.uscg.gov/sites/default/files/pdf/gps/IS-GPS-200N.pdf), current published GPS L1/L2 space segment/user segment interface specification.
 - GPS SPS Performance Standard, current public GPS Standard Positioning Service performance document.
