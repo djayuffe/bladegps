@@ -748,6 +748,11 @@ double subGpsTime(gpstime_t g1, gpstime_t g0)
 	return(dt);
 }
 
+static int rinex_line_has_fields(const char *str)
+{
+	return strlen(str) >= 79;
+}
+
 /*! \brief Read Ephemersi data from the RINEX Navigation file */
 /*  \param[out] eph Array of Output SV ephemeris data
  *  \param[in] fname File name of the RINEX file
@@ -781,7 +786,7 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		if (NULL==fgets(str, MAX_CHAR, fp))
 			break;
 
-		if (strncmp(str+60, "END OF HEADER", 13)==0)
+		if (strlen(str) >= 73 && strncmp(str+60, "END OF HEADER", 13)==0)
 			break;
 	}
 
@@ -791,6 +796,15 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 	while (1)
 	{
 		if (NULL==fgets(str, MAX_CHAR, fp))
+			break;
+		if (!rinex_line_has_fields(str))
+			break;
+
+		// PRN
+		strncpy(tmp, str, 2);
+		tmp[2] = 0;
+		sv = atoi(tmp)-1;
+		if (sv < 0 || sv >= MAX_SAT)
 			break;
 
 		// EPOCH
@@ -815,7 +829,7 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		t.mm = atoi(tmp);
 
 		strncpy(tmp, str+18, 4);
-		tmp[2] = 0;
+		tmp[4] = 0;
 		t.sec = atof(tmp);
 
 		date2gps(&t, &g);
@@ -838,11 +852,6 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		// Date and time
 		eph[ieph][sv].t = t;
 
-		// PRN
-		strncpy(tmp, str, 2);
-		tmp[2] = 0;
-		sv = atoi(tmp)-1;
-
 		// SV CLK
 		eph[ieph][sv].toc = g;
 
@@ -863,6 +872,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 
 		// BROADCAST ORBIT - 1
 		if (NULL==fgets(str, MAX_CHAR, fp))
+			break;
+		if (!rinex_line_has_fields(str))
 			break;
 
 		strncpy(tmp, str+3, 19);
@@ -888,6 +899,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		// BROADCAST ORBIT - 2
 		if (NULL==fgets(str, MAX_CHAR, fp))
 			break;
+		if (!rinex_line_has_fields(str))
+			break;
 
 		strncpy(tmp, str+3, 19);
 		tmp[19] = 0;
@@ -911,6 +924,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 
 		// BROADCAST ORBIT - 3
 		if (NULL==fgets(str, MAX_CHAR, fp))
+			break;
+		if (!rinex_line_has_fields(str))
 			break;
 
 		strncpy(tmp, str+3, 19);
@@ -936,6 +951,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		// BROADCAST ORBIT - 4
 		if (NULL==fgets(str, MAX_CHAR, fp))
 			break;
+		if (!rinex_line_has_fields(str))
+			break;
 
 		strncpy(tmp, str+3, 19);
 		tmp[19] = 0;
@@ -960,6 +977,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		// BROADCAST ORBIT - 5
 		if (NULL==fgets(str, MAX_CHAR, fp))
 			break;
+		if (!rinex_line_has_fields(str))
+			break;
 
 		strncpy(tmp, str+3, 19);
 		tmp[19] = 0;
@@ -973,6 +992,8 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 
 		// BROADCAST ORBIT - 6
 		if (NULL==fgets(str, MAX_CHAR, fp))
+			break;
+		if (!rinex_line_has_fields(str))
 			break;
 
 		strncpy(tmp, str+41, 19);
@@ -1169,7 +1190,8 @@ int readNmeaGGA(double **xyz, const char *filename)
 
 		if (strncmp(token+3, "GGA", 3)==0)
 		{
-			token = strtok(NULL, ","); // Date and time
+			if (strtok(NULL, ",") == NULL) // Date and time
+				continue;
 			
 			token = strtok(NULL, ","); // Latitude
 			if (token == NULL || strlen(token) < 4)
@@ -1475,6 +1497,8 @@ void *gps_task(void *arg)
 	gpstime_t grx;
 	double delt;
 	int isamp;
+	int found_min;
+	int found_max;
 
 	int iumd;
 	int numd;
@@ -1767,7 +1791,7 @@ void *gps_task(void *arg)
 
 	neph = readRinexNavAll(eph, navfile);
 
-	if (neph==0)
+	if (neph<=0)
 	{
 		printf("ERROR: No ephemeris available.\n");
 #ifndef BLADE_GPS
@@ -1777,24 +1801,38 @@ void *gps_task(void *arg)
 #endif
 	}
 
+	found_min = 0;
 	for (sv=0; sv<MAX_SAT; sv++) 
 	{
 		if (eph[0][sv].vflg==1)
 		{
 			gmin = eph[0][sv].toc;
 			tmin = eph[0][sv].t;
+			found_min = 1;
 			break;
 		}
 	}
 
+	found_max = 0;
 	for (sv=0; sv<MAX_SAT; sv++)
 	{
 		if (eph[neph-1][sv].vflg == 1)
 		{
 			gmax = eph[neph-1][sv].toc;
 			tmax = eph[neph-1][sv].t;
+			found_max = 1;
 			break;
 		}
+	}
+
+	if (!found_min || !found_max)
+	{
+		printf("ERROR: No valid ephemeris records found.\n");
+#ifndef BLADE_GPS
+		exit(1);
+#else
+		goto exit;
+#endif
 	}
 
 	if (g0.week>=0)

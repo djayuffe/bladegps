@@ -60,7 +60,7 @@ typedef struct {
 typedef struct {
 	pthread_t thread;
 	pthread_mutex_t lock;
-	//int error;
+	int error;
 
 	struct bladerf *dev;
 	int16_t *buffer;

@@ -72,7 +72,7 @@ void init_sim(sim_t *s)
 {
 	s->tx.dev = NULL;
 	pthread_mutex_init(&(s->tx.lock), NULL);
-	//s->tx.error = 0;
+	s->tx.error = 0;
 
 	pthread_mutex_init(&(s->gps.lock), NULL);
 	//s->gps.error = 0;
@@ -151,6 +151,7 @@ void *tx_task(void *arg)
 {
 	sim_t *s = (sim_t *)arg;
 	size_t samples_populated;
+	int status;
 
 	while (1) {
 		int16_t *tx_buffer_current = s->tx.buffer;
@@ -194,7 +195,17 @@ void *tx_task(void *arg)
 		}
 
 		// If there were no errors, transmit the data buffer.
-		bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER, NULL, TIMEOUT_MS);
+		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER, NULL, TIMEOUT_MS);
+		if (status != 0) {
+			fprintf(stderr, "TX stream failed: %s\n", bladerf_strerror(status));
+			s->tx.error = status;
+			pthread_mutex_lock(&(s->gps.lock));
+			s->finished = true;
+			pthread_cond_broadcast(&(s->fifo_write_ready));
+			pthread_cond_broadcast(&(s->fifo_read_ready));
+			pthread_mutex_unlock(&(s->gps.lock));
+			goto out;
+		}
 		if (is_fifo_write_ready(s)) {
 			/*
 			printf("\rTime = %4.1f", s->time);
@@ -253,6 +264,9 @@ int main(int argc, char *argv[])
 	sim_t s;
 	char *devstr = NULL;
 	int xb_board=0;
+	int exit_code = 1;
+	int gps_started = 0;
+	int tx_enabled = 0;
 
 	int result;
 	datetime_t t0;
@@ -473,22 +487,31 @@ int main(int argc, char *argv[])
 
 	// Start GPS task.
 	s.status = start_gps_task(&s);
-	if (s.status < 0) {
+	if (s.status != 0) {
 		fprintf(stderr, "Failed to start GPS task.\n");
 		goto out;
 	}
-	else
+	else {
+		gps_started = 1;
 		printf("Creating GPS task...\n");
+	}
 
 	// Wait until GPS task is initialized
 	pthread_mutex_lock(&(s.gps.lock));
 	while (!s.gps.ready)
 		pthread_cond_wait(&(s.gps.initialization_done), &(s.gps.lock));
+	if (s.finished) {
+		pthread_mutex_unlock(&(s.gps.lock));
+		fprintf(stderr, "GPS signal generator failed to initialize.\n");
+		goto out;
+	}
 	pthread_mutex_unlock(&(s.gps.lock));
 
 	// Fillfull the FIFO.
+	pthread_mutex_lock(&(s.gps.lock));
 	if (is_fifo_write_ready(&s))
 		pthread_cond_signal(&(s.fifo_write_ready));
+	pthread_mutex_unlock(&(s.gps.lock));
 
 	// Configure the TX module for use with the synchronous interface.
 	s.status = bladerf_sync_config(s.tx.dev,
@@ -510,15 +533,17 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Failed to enable TX module: %s\n", bladerf_strerror(s.status));
 		goto out;
 	}
+	tx_enabled = 1;
 
 	// Start TX task
 	s.status = start_tx_task(&s);
-	if (s.status < 0) {
+	if (s.status != 0) {
 		fprintf(stderr, "Failed to start TX task.\n");
 		goto out;
 	}
-	else
+	else {
 		printf("Creating TX task...\n");
+	}
 
 	// Running...
 	printf("Running...\n");
@@ -526,14 +551,40 @@ int main(int argc, char *argv[])
 
 	// Wainting for TX task to complete.
 	pthread_join(s.tx.thread, NULL);
-	printf("\nDone!\n");
+	if (s.tx.error == 0)
+		printf("\nDone!\n");
+	else
+		printf("\nAborted after TX stream error.\n");
 
 	// Disable TX module and shut down underlying TX stream.
 	s.status = bladerf_enable_module(s.tx.dev, BLADERF_MODULE_TX, false);
 	if (s.status != 0)
 		fprintf(stderr, "Failed to disable TX module: %s\n", bladerf_strerror(s.status));
+	tx_enabled = 0;
+
+	pthread_join(s.gps.thread, NULL);
+	gps_started = 0;
+	exit_code = s.tx.error == 0 ? 0 : 1;
 
 out:
+	if (gps_started) {
+		pthread_mutex_lock(&(s.gps.lock));
+		s.finished = true;
+		pthread_cond_broadcast(&(s.fifo_read_ready));
+		pthread_cond_broadcast(&(s.fifo_write_ready));
+		pthread_cond_broadcast(&(s.gps.initialization_done));
+		pthread_mutex_unlock(&(s.gps.lock));
+	}
+
+	if (gps_started)
+		pthread_join(s.gps.thread, NULL);
+
+	if (tx_enabled && s.tx.dev != NULL) {
+		s.status = bladerf_enable_module(s.tx.dev, BLADERF_MODULE_TX, false);
+		if (s.status != 0)
+			fprintf(stderr, "Failed to disable TX module: %s\n", bladerf_strerror(s.status));
+	}
+
 	// Free up resources
 	if (s.tx.buffer != NULL)
 		free(s.tx.buffer);
@@ -541,8 +592,10 @@ out:
 	if (s.fifo != NULL)
 		free(s.fifo);
 
-	printf("Closing device...\n");
-	bladerf_close(s.tx.dev);
+	if (s.tx.dev != NULL) {
+		printf("Closing device...\n");
+		bladerf_close(s.tx.dev);
+	}
 
-	return(0);
+	return(exit_code);
 }
