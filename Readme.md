@@ -136,6 +136,7 @@ time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 ## Project documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - maintainer architecture, runtime flow, modules, and extension points.
+- [GPS_L1_CA_COVERAGE.md](GPS_L1_CA_COVERAGE.md) - implemented L1 C/A coverage, wired gaps, and non-certified areas.
 - [CHANGELOG.md](CHANGELOG.md) - release history.
 - [LICENSE](LICENSE) - MIT license.
 

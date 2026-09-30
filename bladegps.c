@@ -626,7 +626,7 @@ int main(int argc, char *argv[])
 
 	s.status = bladerf_set_frequency(s.tx.dev, BLADERF_MODULE_TX, TX_FREQUENCY);
 	if (s.status != 0) {
-		fprintf(stderr, "Faield to set TX frequency: %s\n", bladerf_strerror(s.status));
+		fprintf(stderr, "Failed to set TX frequency: %s\n", bladerf_strerror(s.status));
 		goto out;
 	} 
 	else {

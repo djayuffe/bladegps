@@ -282,6 +282,7 @@ bladeGPS can generate signals in a protected satellite navigation band. The soft
 - Auto-download currently uses NOAA/NGS daily GPS broadcast navigation files.
 - Hardware behavior depends on local bladeRF firmware, libbladeRF version, clocking, gain setup, and RF test environment.
 - The realtime path is tested by build/static analysis here; full RF validation requires hardware and shielded lab equipment.
+- See `GPS_L1_CA_COVERAGE.md` for a more detailed implementation and non-certified-area matrix.
 
 ## Extension Points
 
