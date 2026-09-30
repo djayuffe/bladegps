@@ -184,6 +184,8 @@ Latitude is limited to -90..90 degrees and longitude to -180..180 degrees. Recor
 
 Selecting a planned profile returns an error. This prevents an unsupported constellation name from silently producing a GPS waveform. See [MULTI_GNSS.md](MULTI_GNSS.md) for the implementation contract and validation gates.
 
+The source tree already contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping. These primitives do not change a profile to `implemented`: a transmit backend also requires complete navigation messages, constellation-specific ephemeris/time handling, channel mixing, and independent receiver validation.
+
 ## Implementation notes
 
 - The simulator generates 0.1 second blocks at the selected sample rate for bladeRF SC16 transmission; GPS defaults to 2.6 Msps.

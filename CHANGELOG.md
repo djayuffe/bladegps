@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Adds ICD-derived BeiDou B1I ranging-code generation for all 63 published phase assignments.
+- Adds the GLONASS L1OF 511-chip ranging code and standard FDMA slot-to-carrier mapping.
+- Adds all 50 official Galileo E1-B and all 50 E1-C 4092-chip primary memory codes, hexadecimal decoding, and exact CBOC subcarrier primitives.
+- Adds the Galileo E1-C 25-chip secondary code, BeiDou B1I Neumann-Hoffman code, and GLONASS 30-bit time mark.
+- Adds fixed-vector checksums, balance checks, FDMA edge tests, and CBOC coefficient tests for the new signal primitives.
 - Adds a constellation/signal registry for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF, with explicit implementation status and passband validation.
 - Adds `-S`/`-L` signal-profile controls and runtime bladeRF device, frequency, sample-rate, bandwidth, gain, and elevation-mask options.
 - Keeps unsupported constellation profiles fail-closed until their waveform, navigation-message, ephemeris, and validation backends are complete.

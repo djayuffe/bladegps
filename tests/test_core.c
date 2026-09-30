@@ -113,6 +113,83 @@ static void test_signal_profiles(void)
 	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
 }
 
+static uint32_t code_bit_checksum(const int8_t *chips, size_t count)
+{
+	uint32_t hash = UINT32_C(2166136261);
+	size_t index;
+
+	for (index = 0; index < count; index++) {
+		uint8_t bit = chips[index] < 0 ? 1U : 0U;
+		hash = (hash ^ bit) * UINT32_C(16777619);
+	}
+	return hash;
+}
+
+static void test_multi_gnss_codes(void)
+{
+	int8_t b1i[BEIDOU_B1I_CODE_LENGTH];
+	int8_t glonass[GLONASS_L1OF_CODE_LENGTH];
+	int8_t galileo[GALILEO_E1_CODE_LENGTH];
+	int8_t secondary[GLONASS_TIME_MARK_LENGTH];
+	int8_t decoded[8];
+	double carrier;
+	double data[GALILEO_E1_CBOC_SUBCHIPS];
+	double pilot[GALILEO_E1_CBOC_SUBCHIPS];
+	size_t index;
+	int negative_count;
+
+	assert(gnss_beidou_b1i_code(1, b1i) == 0);
+	assert(code_bit_checksum(b1i, BEIDOU_B1I_CODE_LENGTH) == UINT32_C(0x58325b3a));
+	negative_count = 0;
+	for (index = 0; index < BEIDOU_B1I_CODE_LENGTH; index++)
+		negative_count += b1i[index] < 0;
+	assert(negative_count == 1023);
+	assert(gnss_beidou_b1i_code(38, b1i) == 0);
+	assert(code_bit_checksum(b1i, BEIDOU_B1I_CODE_LENGTH) == UINT32_C(0x130a655e));
+	assert(gnss_beidou_b1i_code(63, b1i) == 0);
+	assert(code_bit_checksum(b1i, BEIDOU_B1I_CODE_LENGTH) == UINT32_C(0x29af803e));
+	assert(gnss_beidou_b1i_code(0, b1i) == -1);
+	assert(gnss_beidou_b1i_code(64, b1i) == -1);
+
+	assert(gnss_glonass_l1of_code(glonass) == 0);
+	assert(code_bit_checksum(glonass, GLONASS_L1OF_CODE_LENGTH) == UINT32_C(0x143e2769));
+	assert(gnss_glonass_l1of_carrier_hz(-7, &carrier) == 0);
+	assert(carrier == 1598062500.0);
+	assert(gnss_glonass_l1of_carrier_hz(6, &carrier) == 0);
+	assert(carrier == 1605375000.0);
+	assert(gnss_glonass_l1of_carrier_hz(7, &carrier) == -1);
+
+	assert(gnss_decode_hex_code("A5", 8, decoded) == 0);
+	assert(decoded[0] == -1 && decoded[1] == 1 && decoded[2] == -1 && decoded[3] == 1);
+	assert(decoded[4] == 1 && decoded[5] == -1 && decoded[6] == 1 && decoded[7] == -1);
+	assert(gnss_decode_hex_code("G5", 8, decoded) == -1);
+	assert(gnss_galileo_e1_primary_code(1, GALILEO_E1_COMPONENT_B, galileo) == 0);
+	assert(code_bit_checksum(galileo, GALILEO_E1_CODE_LENGTH) == UINT32_C(0x2c3f6f93));
+	assert(gnss_galileo_e1_primary_code(50, GALILEO_E1_COMPONENT_B, galileo) == 0);
+	assert(code_bit_checksum(galileo, GALILEO_E1_CODE_LENGTH) == UINT32_C(0x25f2a4f9));
+	assert(gnss_galileo_e1_primary_code(1, GALILEO_E1_COMPONENT_C, galileo) == 0);
+	assert(code_bit_checksum(galileo, GALILEO_E1_CODE_LENGTH) == UINT32_C(0x2f729bf5));
+	assert(gnss_galileo_e1_primary_code(50, GALILEO_E1_COMPONENT_C, galileo) == 0);
+	assert(code_bit_checksum(galileo, GALILEO_E1_CODE_LENGTH) == UINT32_C(0xc0099bb1));
+	assert(gnss_galileo_e1_primary_code(0, GALILEO_E1_COMPONENT_B, galileo) == -1);
+	assert(gnss_galileo_e1_primary_code(51, GALILEO_E1_COMPONENT_C, galileo) == -1);
+	assert(gnss_galileo_e1_primary_code(1, (galileo_e1_component_t)99, galileo) == -1);
+	assert(gnss_galileo_e1c_secondary_code(secondary) == 0);
+	assert(code_bit_checksum(secondary, GALILEO_E1C_SECONDARY_LENGTH) == UINT32_C(0x45d5cfa3));
+	assert(gnss_beidou_b1i_nh_code(secondary) == 0);
+	assert(code_bit_checksum(secondary, BEIDOU_B1I_NH_LENGTH) == UINT32_C(0xf478aba7));
+	assert(gnss_glonass_time_mark(secondary) == 0);
+	assert(code_bit_checksum(secondary, GLONASS_TIME_MARK_LENGTH) == UINT32_C(0x94c5d52b));
+
+	gnss_galileo_e1_cboc(data, pilot);
+	for (index = 0; index < GALILEO_E1_CBOC_SUBCHIPS; index++) {
+		assert(isfinite(data[index]) && isfinite(pilot[index]));
+		assert(fabs(data[index] - pilot[index]) > 0.0);
+	}
+	assert(fabs(data[0] - (sqrt(10.0/11.0) + sqrt(1.0/11.0))) < 1.0e-14);
+	assert(fabs(pilot[0] - (sqrt(10.0/11.0) - sqrt(1.0/11.0))) < 1.0e-14);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -151,6 +228,7 @@ int main(void)
 	test_ca_code_balance();
 	test_ephemeris_selection();
 	test_signal_profiles();
+	test_multi_gnss_codes();
 	test_llh_motion();
 #ifndef _WIN32
 	test_compressed_rinex_sample();

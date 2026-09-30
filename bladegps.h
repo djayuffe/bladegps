@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include "gpssim.h"
 #include "gnss.h"
+#include "gnss_codes.h"
 
 #define DEFAULT_TX_FREQUENCY	1575420000U
 #define DEFAULT_TX_SAMPLERATE	2600000U

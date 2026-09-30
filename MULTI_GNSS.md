@@ -9,12 +9,12 @@ Only `gps-l1ca` has a production waveform backend. The other profiles are intent
 | Layer | GPS L1 C/A | Galileo E1 OS | BeiDou B1I | GLONASS L1OF |
 | --- | --- | --- | --- | --- |
 | Signal/RF profile | Implemented | Implemented | Implemented | Implemented |
-| Passband validation | Implemented | Implemented | Implemented | Base-band check only; per-slot checks pending |
+| Passband validation | Implemented | Implemented | Implemented | Profile check implemented; per-satellite slot mixer pending |
 | Broadcast ephemeris parser | RINEX 2 GPS | Not implemented | Not implemented | Not implemented |
 | Orbit/clock model | Implemented | Not implemented | Not implemented | Not implemented |
-| Ranging-code generator | Implemented | Not implemented | Not implemented | Not implemented |
+| Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
 | Navigation message | GPS LNAV | Not implemented | Not implemented | Not implemented |
-| Modulation/mixer | BPSK(1) | Not implemented | Not implemented | Not implemented |
+| Modulation/mixer | BPSK(1) | CBOC subcarrier primitive implemented; channel mixer pending | BPSK primitive pending channel integration | FDMA carrier mapping implemented; channel mixer pending |
 | Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
 
 ## Core separation
