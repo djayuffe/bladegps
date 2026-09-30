@@ -12,6 +12,7 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Dynamic receiver mode from NMEA GGA streams.
 - Optional keyboard-controlled interactive motion mode.
 - RINEX broadcast navigation file parsing.
+- Automatic daily GPS broadcast ephemeris download when `-e` is omitted.
 - Real-time SC16 I/Q streaming to bladeRF.
 - Optional XB200 setup for GPS-band transmit filtering/path selection.
 - Portable Makefile that uses `pkg-config libbladeRF` when available, with the original adjacent bladeRF source-tree fallback.
@@ -23,6 +24,7 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - libbladeRF headers and library.
 - A bladeRF device supported by libbladeRF.
 - `pkg-config` is recommended so the Makefile can discover libbladeRF automatically.
+- `curl` and `gzip` are required only when using automatic ephemeris download.
 
 On macOS with MacPorts, for example, the build can use libbladeRF from `/opt/local` through `pkg-config`. On Linux, install libbladeRF development files through your package manager or build them from Nuand's source tree.
 
@@ -56,7 +58,7 @@ make clean
 ```text
 Usage: bladegps [options]
 Options:
-  -e <gps_nav>     RINEX navigation file for GPS ephemerides (required)
+  -e <gps_nav>     RINEX navigation file for GPS ephemerides (auto-downloads if omitted)
   -u <user_motion> User motion file (dynamic mode)
   -g <nmea_gga>    NMEA GGA stream (dynamic mode)
   -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100
@@ -71,6 +73,14 @@ Static location example:
 ```sh
 ./bladegps -e brdc2940.18n -l 59.3293,18.0686,30 -d 60
 ```
+
+Automatic ephemeris download example:
+
+```sh
+./bladegps -l 59.3293,18.0686,30 -d 60
+```
+
+When `-e` is omitted, bladeGPS downloads the daily GPS broadcast ephemeris from NOAA/NGS CORS using the `-t` scenario date if provided, otherwise the current UTC date. The downloaded file is saved as `brdcDDD0.YYn` in the working directory and reused on later runs.
 
 User motion CSV example:
 
@@ -109,6 +119,7 @@ time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 - Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
+- If `-e` is omitted, the downloader fetches NOAA/NGS CORS RINEX v2 daily GPS navigation data from `https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz`.
 
 ## Safety
 

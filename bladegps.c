@@ -3,6 +3,8 @@
 #include "bladegps.h"
 #include <errno.h>
 #include <math.h>
+#include <time.h>
+#include <sys/stat.h>
 
 // for _getch used in Windows runtime.
 #ifdef WIN32
@@ -66,6 +68,114 @@ static int parse_xb_board(const char *arg, int *xb_board)
 
 	*xb_board = (int)value;
 	return 0;
+}
+
+static int file_exists(const char *path)
+{
+	struct stat st;
+
+	return path != NULL && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static int is_leap_year(int year)
+{
+	return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+static int day_of_year(const datetime_t *date)
+{
+	static const int month_days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	int doy = 0;
+	int month;
+
+	if (date->m < 1 || date->m > 12 || date->d < 1)
+		return -1;
+
+	for (month = 1; month < date->m; month++)
+		doy += month_days[month - 1] + (month == 2 && is_leap_year(date->y));
+
+	if (date->d > month_days[date->m - 1] + (date->m == 2 && is_leap_year(date->y)))
+		return -1;
+
+	return doy + date->d;
+}
+
+static int utc_today(datetime_t *date)
+{
+	time_t now;
+	struct tm tm_utc;
+#ifdef _WIN32
+	struct tm *result;
+#endif
+
+	now = time(NULL);
+	if (now == (time_t)-1)
+		return -1;
+
+#ifdef _WIN32
+	result = gmtime(&now);
+	if (result == NULL)
+		return -1;
+	tm_utc = *result;
+#else
+	if (gmtime_r(&now, &tm_utc) == NULL)
+		return -1;
+#endif
+
+	date->y = tm_utc.tm_year + 1900;
+	date->m = tm_utc.tm_mon + 1;
+	date->d = tm_utc.tm_mday;
+	date->hh = 0;
+	date->mm = 0;
+	date->sec = 0.0;
+	return 0;
+}
+
+static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, size_t navfile_size)
+{
+	int doy;
+	int yy;
+	char out_path[MAX_CHAR];
+	char gz_path[MAX_CHAR];
+	char url[256];
+	char cmd[768];
+	int status;
+
+	doy = day_of_year(date);
+	if (doy < 1)
+		return -1;
+
+	yy = date->y % 100;
+	if (snprintf(out_path, sizeof(out_path), "brdc%03d0.%02dn", doy, yy) >= (int)sizeof(out_path))
+		return -1;
+	if (snprintf(gz_path, sizeof(gz_path), "%s.gz", out_path) >= (int)sizeof(gz_path))
+		return -1;
+
+	if (file_exists(out_path)) {
+		printf("Using existing broadcast ephemeris: %s\n", out_path);
+		return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
+	}
+
+	if (snprintf(url, sizeof(url),
+		"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
+		date->y, doy, doy, yy) >= (int)sizeof(url))
+		return -1;
+
+	printf("Downloading broadcast ephemeris: %s\n", url);
+	if (snprintf(cmd, sizeof(cmd), "curl -fL --retry 2 --connect-timeout 15 -o '%s' '%s'", gz_path, url) >= (int)sizeof(cmd))
+		return -1;
+	status = system(cmd);
+	if (status != 0)
+		return -1;
+
+	if (snprintf(cmd, sizeof(cmd), "gzip -cd '%s' > '%s'", gz_path, out_path) >= (int)sizeof(cmd))
+		return -1;
+	status = system(cmd);
+	if (status != 0)
+		return -1;
+
+	printf("Saved broadcast ephemeris: %s\n", out_path);
+	return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
 }
 
 void init_sim(sim_t *s)
@@ -245,7 +355,7 @@ void usage(void)
 {
 	printf("Usage: bladegps [options]\n"
 		"Options:\n"
-		"  -e <gps_nav>     RINEX navigation file for GPS ephemerides (required)\n"
+		"  -e <gps_nav>     RINEX navigation file for GPS ephemerides (auto-downloads if omitted)\n"
 		"  -u <user_motion> User motion file (dynamic mode)\n"
 		"  -g <nmea_gga>    NMEA GGA stream (dynamic mode)\n"
 		"  -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100\n"
@@ -270,6 +380,8 @@ int main(int argc, char *argv[])
 
 	int result;
 	datetime_t t0;
+	datetime_t navdate;
+	int navdate_set = 0;
 
 	if (argc<3)
 	{
@@ -334,6 +446,8 @@ int main(int argc, char *argv[])
 			}
 			t0.sec = floor(t0.sec);
 			date2gps(&t0, &s.opt.g0);
+			navdate = t0;
+			navdate_set = 1;
 			break;
 		case 'd':
 			if (parse_duration(optarg, &s.opt.iduration) != 0) {
@@ -359,10 +473,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (s.opt.navfile[0]==0)
-	{
-		printf("ERROR: GPS ephemeris file is not specified.\n");
-		exit(1);
+	if (s.opt.navfile[0]==0) {
+		if (!navdate_set && utc_today(&navdate) != 0) {
+			printf("ERROR: GPS ephemeris file is not specified and current UTC date is unavailable.\n");
+			exit(1);
+		}
+		if (download_broadcast_ephemeris(&navdate, s.opt.navfile, sizeof(s.opt.navfile)) != 0) {
+			printf("ERROR: Failed to auto-download GPS broadcast ephemeris. Use -e <gps_nav> to provide one manually.\n");
+			exit(1);
+		}
 	}
 
 	if (s.opt.umfile[0]==0 && !s.opt.staticLocationMode)
