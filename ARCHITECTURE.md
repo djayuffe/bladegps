@@ -165,6 +165,7 @@ Most signal logic is in `gpssim.c`.
 - Groups ephemerides into time sets.
 - Validates line length before fixed-column access.
 - Bounds-checks PRN before indexing `eph`.
+- Parses SV health and accuracy fields.
 - Converts RINEX `D` exponent designators to `E`.
 - Precomputes orbital working values such as semi-major axis and mean motion.
 
@@ -189,8 +190,8 @@ Important functions:
 
 - `satpos()` computes satellite position, velocity, and clock correction.
 - `computeRange()` computes geometric distance, pseudorange, range rate, azimuth, and elevation.
-- `checkSatVisibility()` applies the elevation mask.
-- `allocateChannel()` assigns visible satellites to simulated channels.
+- `checkSatVisibility()` rejects unhealthy satellites and applies the elevation mask using the same Sagnac-aware range path as pseudorange generation.
+- `allocateChannel()` assigns healthy visible satellites to simulated channels.
 
 ### Navigation Message
 
@@ -264,6 +265,8 @@ The current code favors clear failure over partial or silent operation:
 - Missing ephemeris data fails before hardware TX starts.
 - Malformed NMEA lines are skipped.
 - Malformed RINEX records stop parsing without indexing outside satellite bounds.
+- Unhealthy satellites from RINEX navigation records are not allocated to channels.
+- GPS receiver time is normalized across week boundaries during long simulations.
 - GPS initialization failure wakes waiting threads.
 - TX stream errors stop generation, wake the GPS producer if it is waiting for FIFO space, and return non-zero.
 - Download failures clean temporary files and suggest manual `-e`.

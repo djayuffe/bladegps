@@ -102,6 +102,8 @@ double ant_pat_db[37] = {
 
 int allocatedSat[MAX_SAT];
 
+static unsigned long uraIndexFromAccuracy(double accuracy);
+
 /*! \brief Subtract two vectors of double
  *  \param[out] y Result of subtraction
  *  \param[in] x1 Minuend of subtracion
@@ -527,7 +529,7 @@ void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF])
 	long af2;
 	long tgd;
 
-	unsigned long ura = 2UL;
+	unsigned long ura;
 	unsigned long dataId = 1UL;
 	unsigned long sbf4_page25_svId = 63UL;
 	unsigned long sbf5_page25_svId = 51UL;
@@ -562,11 +564,12 @@ void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF])
 
 	wna = (unsigned long)(eph.toe.week%256);
 	toa = (unsigned long)(eph.toe.sec/4096.0);
+	ura = uraIndexFromAccuracy(eph.sv_accuracy);
 
 	// Subframe 1
 	sbf[0][0] = 0x8B0000UL<<6;
 	sbf[0][1] = 0x1UL<<8;
-	sbf[0][2] = ((wn&0x3FFUL)<<20) | (ura<<14) | (((iodc>>8)&0x3UL)<<6);
+	sbf[0][2] = ((wn&0x3FFUL)<<20) | (ura<<14) | (((unsigned long)eph.sv_health&0x3FUL)<<8) | (((iodc>>8)&0x3UL)<<6);
 	sbf[0][3] = 0UL;
 	sbf[0][4] = 0UL;
 	sbf[0][5] = 0UL;
@@ -746,6 +749,37 @@ double subGpsTime(gpstime_t g1, gpstime_t g0)
 	dt += (double)(g1.week - g0.week) * SECONDS_IN_WEEK;
 
 	return(dt);
+}
+
+void normalizeGpsTime(gpstime_t *g)
+{
+	while (g->sec >= SECONDS_IN_WEEK) {
+		g->sec -= SECONDS_IN_WEEK;
+		g->week++;
+	}
+
+	while (g->sec < 0.0) {
+		g->sec += SECONDS_IN_WEEK;
+		g->week--;
+	}
+}
+
+static unsigned long uraIndexFromAccuracy(double accuracy)
+{
+	static const double ura_threshold[] = {
+		2.4, 3.4, 4.85, 6.85, 9.65, 13.65, 24.0, 48.0,
+		96.0, 192.0, 384.0, 768.0, 1536.0, 3072.0, 6144.0
+	};
+	unsigned long i;
+
+	if (accuracy <= 0.0)
+		return 2UL;
+
+	for (i = 0; i < sizeof(ura_threshold) / sizeof(ura_threshold[0]); i++)
+		if (accuracy <= ura_threshold[i])
+			return i;
+
+	return 15UL;
 }
 
 static int rinex_line_has_fields(const char *str)
@@ -996,6 +1030,16 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname)
 		if (!rinex_line_has_fields(str))
 			break;
 
+		strncpy(tmp, str+3, 19);
+		tmp[19] = 0;
+		replaceExpDesignator(tmp, 19);
+		eph[ieph][sv].sv_accuracy = atof(tmp);
+
+		strncpy(tmp, str+22, 19);
+		tmp[19] = 0;
+		replaceExpDesignator(tmp, 19);
+		eph[ieph][sv].sv_health = (int)atof(tmp);
+
 		strncpy(tmp, str+41, 19);
 		tmp[19] = 0;
 		replaceExpDesignator(tmp, 19);
@@ -1109,7 +1153,7 @@ void computeCodePhase(channel_t *chan, range_t rho1, double dt)
 	chan->f_code = CODE_FREQ + chan->f_carr*CARR_TO_CODE;
 
 	// Initial code phase and data bit counters.
-	ms = (((chan->rho0.g.sec-chan->g0.sec)+6.0) - chan->rho0.range/SPEED_OF_LIGHT)*1000.0;
+	ms = ((subGpsTime(chan->rho0.g, chan->g0)+6.0) - chan->rho0.range/SPEED_OF_LIGHT)*1000.0;
 
 	ims = (int)ms;
 	chan->code_phase = (ms-(double)ims)*CA_SEQ_LEN; // in chip
@@ -1350,20 +1394,17 @@ int generateNavMsg(gpstime_t g, channel_t *chan, int init)
 
 int checkSatVisibility(ephem_t eph, gpstime_t g, double *xyz, double elvMask, double *azel)
 {
-	double llh[3],neu[3];
-	double pos[3],vel[3],clk[3],los[3];
-	double tmat[3][3];
+	range_t rho;
 
 	if (eph.vflg != 1)
 		return (-1); // Invalid
 
-	xyz2llh(xyz,llh);
-	ltcmat(llh, tmat);
+	if (eph.sv_health != 0)
+		return (-1); // Unhealthy
 
-	satpos(eph, g, pos, vel, clk);
-	subVect(los, pos, xyz);
-	ecef2neu(los, tmat, neu);
-	neu2azel(azel, neu);
+	computeRange(&rho, eph, g, xyz);
+	azel[0] = rho.azel[0];
+	azel[1] = rho.azel[1];
 
 	if (azel[1]*R2D > elvMask)
 		return (1); // Visible
@@ -1384,7 +1425,7 @@ int allocateChannel(channel_t *chan, ephem_t *eph, gpstime_t grx, double *xyz, d
 
 	for (sv=0; sv<MAX_SAT; sv++)
 	{
-		if(checkSatVisibility(eph[sv], grx, xyz, 0.0, azel)==1)
+		if(checkSatVisibility(eph[sv], grx, xyz, elvMask, azel)==1)
 		{
 			nsat++; // Number of visible satellites
 
@@ -1984,6 +2025,7 @@ void *gps_task(void *arg)
 
 	// Update receiver time
 	grx.sec += 0.1;
+	normalizeGpsTime(&grx);
 
 	for (iumd=1; iumd<numd; iumd++)
 	{
@@ -2268,6 +2310,7 @@ void *gps_task(void *arg)
 
 		// Update receiver time
 		grx.sec += 0.1;
+		normalizeGpsTime(&grx);
 
 		// Update time counter
 		printf("\rTime into run = %4.1f", grx.sec-g0.sec);

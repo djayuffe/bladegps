@@ -10,10 +10,14 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - 50 bps navigation-data timing through 20 C/A-code epochs per data bit.
 - 30-bit navigation words and subframe buffers.
 - Broadcast ephemeris parsing from RINEX navigation files.
+- RINEX SV health and accuracy parsing.
+- Unhealthy-satellite exclusion during visibility/channel allocation.
+- URA index propagation into subframe 1 from RINEX SV accuracy.
 - Navigation message generation from broadcast ephemeris.
-- Satellite ECEF position, velocity, range, range-rate, azimuth, and elevation calculations.
+- Satellite ECEF position, velocity, clock correction, range, range-rate, azimuth, and elevation calculations.
+- GPS week-normalized receiver time and code-phase timing.
 - Receiver motion from static LLH, ECEF CSV, NMEA GGA, or interactive keyboard motion.
-- Dynamic channel allocation for visible satellites.
+- Dynamic channel allocation for healthy visible satellites above the configured elevation mask.
 - SC16 I/Q synthesis at 2.6 Msps.
 - Real-time streaming through bladeRF synchronous TX.
 - Automatic daily GPS broadcast ephemeris download from NOAA/NGS CORS when `-e` is omitted.
@@ -27,6 +31,9 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - The GPS producer exits cleanly if TX fails while the FIFO is full.
 - GPS-task early-exit cleanup now frees allocated motion and I/Q buffers.
 - Standalone file-output cleanup frees the 1-bit/8-bit I/Q buffer.
+- Satellite visibility now uses the same range/azimuth/elevation path as pseudorange generation.
+- Channel allocation now respects its elevation-mask argument.
+- Receiver time and code phase are normalized across GPS week boundaries.
 
 ## Known Non-Certified Areas
 
@@ -38,6 +45,7 @@ These areas are not currently claimed as fully certified:
 - Formal parity/word-level comparison against official IS-GPS-200 test vectors.
 - RF spectral mask, absolute power, group delay, and modulation quality validation on physical hardware.
 - Leap-second and UTC/GPS edge-case validation across historical navigation files.
+- Formal URA/health bit-level validation against official navigation-message vectors.
 - Robust external-process-free ephemeris download on Windows without `curl` and `gzip`.
 - Automated receiver-acquisition/regression tests using hardware-in-the-loop.
 
