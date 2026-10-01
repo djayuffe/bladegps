@@ -444,6 +444,53 @@ static void test_beidou_d1_ephemeris(void)
 	assert(gnss_beidou_d1_ephemeris_subframes(&fields,0U,sf2,sf3) == -1);
 }
 
+static uint32_t glonass_field(const uint8_t string[85], unsigned int first,
+	unsigned int width)
+{
+	uint32_t value = 0U;
+	unsigned int bit;
+	for (bit=0U; bit<width; bit++)
+		value |= (uint32_t)string[85U-(first+bit)] << bit;
+	return value;
+}
+
+static void test_glonass_immediate_strings(void)
+{
+	glonass_gnav_immediate_t fields = {
+		.tk_seconds=23U*3600U+59U*60U+30U, .tb=95U, .bn=5U,
+		.p1=3U, .p2=1U, .p3=1U, .p4=1U, .p=2U, .ln=1U,
+		.ft=12U, .en=17U, .slot=24U, .mode=2U, .nt=1461U,
+		.position={-1234567,2345678,-3456789},
+		.velocity={765432,-654321,543210},
+		.acceleration={-15,14,-13}, .gamma=-511, .tau=-1048575,
+		.delta_tau=15
+	};
+	uint8_t strings[4][GLONASS_GNAV_STRING_BITS];
+	assert(gnss_glonass_gnav_immediate_strings(&fields,strings) == 0);
+	assert(glonass_field(strings[0],81,4) == 1U);
+	assert(glonass_field(strings[1],81,4) == 2U);
+	assert(glonass_field(strings[2],81,4) == 3U);
+	assert(glonass_field(strings[3],81,4) == 4U);
+	assert(glonass_field(strings[0],65,12) == ((23U<<7)|(59U<<1)|1U));
+	assert(glonass_field(strings[0],9,26) == 1234567U);
+	assert(glonass_field(strings[0],35,1) == 1U);
+	assert(glonass_field(strings[1],9,26) == 2345678U);
+	assert(glonass_field(strings[1],35,1) == 0U);
+	assert(glonass_field(strings[2],69,10) == 511U);
+	assert(glonass_field(strings[2],79,1) == 1U);
+	assert(glonass_field(strings[1],70,7) == 95U);
+	assert(glonass_field(strings[1],78,3) == 5U);
+	assert(glonass_field(strings[3],9,2) == 2U);
+	assert(glonass_field(strings[3],11,5) == 24U);
+	assert(glonass_field(strings[3],16,11) == 1461U);
+	assert(glonass_field(strings[3],59,21) == 1048575U);
+	assert(glonass_field(strings[3],80,1) == 1U);
+	fields.tk_seconds = 1U;
+	assert(gnss_glonass_gnav_immediate_strings(&fields,strings) == -1);
+	fields.tk_seconds = 0U; fields.position[0] = (1<<26);
+	assert(gnss_glonass_gnav_immediate_strings(&fields,strings) == -1);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -558,6 +605,7 @@ int main(void)
 	test_galileo_inav_words();
 	test_beidou_navigation_subframe();
 	test_beidou_d1_ephemeris();
+	test_glonass_immediate_strings();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32

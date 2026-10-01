@@ -20,6 +20,9 @@
   field quantization, split-field placement, and BDT week rollover handling.
 - Corrected BeiDou RINEX A23 Orbit-7 parsing to consume its two defined fields
   instead of manufacturing two trailing semantic values.
+- Added GLONASS GNAV immediate strings 1-4 with exact ICD bit positions,
+  sign-magnitude numeric fields, time/health/control fields, and Hamming-protected
+  85-bit output strings.
 
 ## Unreleased
 
