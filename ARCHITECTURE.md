@@ -17,7 +17,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `gnss_orbit.c` / `gnss_orbit.h` | Constellation-aware Keplerian, BeiDou GEO, clock/relativity, and GLONASS numerical propagation models. |
 | `gnss_fec.c` / `gnss_fec.h` | Galileo CRC-24Q/convolutional/interleaving primitives and BeiDou BCH/interleaving primitives. |
 | `gnss_galileo_nav.c` / `gnss_galileo_nav.h` | Galileo nominal E1-B I/NAV vertical-page construction, CRC coverage, FEC/interleaving, sync/SSP insertion, and 30-second word schedule. |
-| `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, common subframe headers, and D1 ephemeris subframes 2/3 with RINEX-to-ICD scaling. |
+| `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, D1 clock/ephemeris subframes 1-3, D2 GEO basic-navigation pages 1-10, shared almanac payloads, format-specific schedules, and RINEX-to-ICD scaling. |
 | `gnss_glonass_nav.c` / `gnss_glonass_nav.h` | GLONASS RINEX A15 conversion and GNAV immediate strings 1-4, including sign-magnitude fields, UTC(SU)+3 timing, four-year day index, and Hamming-protected 85-bit strings. |
 | `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
@@ -67,6 +67,13 @@ below-mask, malformed, and out-of-band candidates before retaining the highest
 elevation signals. Production CLI selection remains fail-closed until the
 constellation-specific scheduler supplies this layer with time-aligned navigation
 symbols and validated ranges.
+
+Allocator updates use `gnss_rf_reconcile()`. A surviving signal is identified by
+constellation, PRN, carrier, modulation, and timing configuration; all four live
+phases are copied into the replacement channel bank. New signals use their
+caller-supplied initial phases, removed signals are disabled, duplicate identities
+are rejected, and reallocating a bank therefore cannot silently restart an
+unchanged carrier or spreading code.
 
 ## Command-Line Lifecycle
 

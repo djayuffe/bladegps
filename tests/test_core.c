@@ -137,6 +137,7 @@ static void test_rf_renderer_and_allocator(void)
 	};
 	int16_t one_block[200], split_blocks[200];
 	size_t selected[2], selected_count=0U;
+	gnss_rf_channel_t bank[2]={{0}},desired[2];
 
 	assert(gnss_rf_render(&whole,1U,10000000.0,1000000.0,one_block,100U)==0);
 	assert(gnss_rf_render(&split,1U,10000000.0,1000000.0,split_blocks,40U)==0);
@@ -153,6 +154,17 @@ static void test_rf_renderer_and_allocator(void)
 	assert(gnss_rf_allocate(candidates,6U,1575.42e6,30.0e6,0.30,
 		selected,2U,&selected_count)==0);
 	assert(selected_count==2U && selected[0]==1U && selected[1]==5U);
+	desired[0]=whole; desired[1]=whole; desired[1].system=GNSS_SYSTEM_GALILEO;
+	desired[1].prn=2U; desired[1].carrier_hz=10001000.0;
+	assert(gnss_rf_reconcile(bank,2U,desired,2U)==0);
+	bank[0].carrier_phase=1.25; bank[0].code_phase=2.5;
+	bank[0].data_phase=1.5; bank[0].overlay_phase=0.5;
+	desired[0]=desired[1]; desired[1]=whole;
+	assert(gnss_rf_reconcile(bank,2U,desired,2U)==0);
+	assert(bank[1].carrier_phase==1.25 && bank[1].code_phase==2.5 &&
+		bank[1].data_phase==1.5 && bank[1].overlay_phase==0.5);
+	desired[1]=desired[0];
+	assert(gnss_rf_reconcile(bank,2U,desired,2U)==-1);
 }
 
 static void test_constellation_rf_sequences(void)
@@ -567,6 +579,85 @@ static void test_beidou_d1_clock(void)
 	assert(gnss_beidou_d1_clock_subframe(&fields,0U,sf)==-1);
 }
 
+static void test_beidou_almanac_pages(void)
+{
+	beidou_almanac_t fields={
+		.sqrt_a=UINT32_C(0xabcdef),.clock_rate=-1024,.clock_bias=1023,
+		.omega0=-8388608,.eccentricity=UINT32_C(0x1ffff),
+		.inclination_offset=-32768,.toa=255U,.omega_rate=65535,
+		.argument_of_perigee=8388607,.mean_anomaly=-1,.identifier=3U
+	};
+	uint8_t subframe[300],information[224];
+	const uint8_t *payload;
+	assert(gnss_beidou_almanac_subframe(BEIDOU_NAV_D1,4U,24U,12345U,
+		&fields,subframe)==0);
+	recover_beidou_information(subframe,information); payload=information+38U;
+	assert(unpack_bits(information,15U,3U)==4U);
+	assert(unpack_bits(information,18U,20U)==12345U);
+	assert(unpack_bits(payload,0U,1U)==0U && unpack_bits(payload,1U,7U)==24U);
+	assert(unpack_bits(payload,8U,24U)==UINT32_C(0xabcdef));
+	assert(unpack_bits(payload,32U,11U)==0x400U);
+	assert(unpack_bits(payload,43U,11U)==0x3ffU);
+	assert(unpack_bits(payload,54U,24U)==UINT32_C(0x800000));
+	assert(unpack_bits(payload,78U,17U)==UINT32_C(0x1ffff));
+	assert(unpack_bits(payload,95U,16U)==UINT32_C(0x8000));
+	assert(unpack_bits(payload,111U,8U)==255U);
+	assert(unpack_bits(payload,119U,17U)==65535U);
+	assert(unpack_bits(payload,136U,24U)==UINT32_C(0x7fffff));
+	assert(unpack_bits(payload,160U,24U)==UINT32_C(0xffffff));
+	assert(unpack_bits(payload,184U,2U)==3U);
+	assert(gnss_beidou_almanac_subframe(BEIDOU_NAV_D2,5U,37U,0U,
+		&fields,subframe)==0);
+	assert(gnss_beidou_almanac_subframe(BEIDOU_NAV_D1,5U,10U,0U,
+		&fields,subframe)==-1);
+	assert(gnss_beidou_almanac_subframe(BEIDOU_NAV_D2,4U,37U,0U,
+		&fields,subframe)==-1);
+	fields.identifier=4U;
+	assert(gnss_beidou_almanac_subframe(BEIDOU_NAV_D1,4U,1U,0U,
+		&fields,subframe)==-1);
+}
+
+static void test_beidou_d2_basic_pages(void)
+{
+	beidou_d1_clock_t clock={
+		.health=1U,.aodc=17U,.urai=9U,.aode=19U,.week=4097U,.toc=65535U,
+		.tgd1=-511,.tgd2=510,.alpha={-128,127,-1,1},.beta={2,-2,64,-64},
+		.af0=-8388608,.af1=-1,.af2=1023
+	};
+	beidou_d1_ephemeris_t ephemeris={
+		.toe=UINT32_C(0x15555),.delta_mean_motion=-32768,.cuc=-1,
+		.mean_anomaly=INT32_MIN,.cus=131071,.crc=-131072,.crs=131071,
+		.eccentricity=UINT32_C(0x89abcdef),.sqrt_a=UINT32_C(0xfedcba98),
+		.inclination0=INT32_MAX,.cic=-2,.omega_rate=-8388608,.cis=2,
+		.inclination_rate=-8192,.omega0=-123456789,
+		.argument_of_perigee=123456789
+	};
+	uint8_t pages[10][300],information[224];
+	const uint8_t *payload;
+	assert(gnss_beidou_d2_basic_pages(&clock,&ephemeris,604794U,pages)==0);
+	recover_beidou_information(pages[0],information); payload=information+38U;
+	assert(unpack_bits(information,18U,20U)==604794U);
+	assert(unpack_bits(payload,0U,4U)==1U && unpack_bits(payload,4U,1U)==1U);
+	assert(unpack_bits(payload,5U,5U)==17U && unpack_bits(payload,10U,4U)==9U);
+	assert(unpack_bits(payload,14U,13U)==4097U && unpack_bits(payload,27U,17U)==65535U);
+	assert(unpack_bits(payload,44U,10U)==0x201U && unpack_bits(payload,54U,10U)==510U);
+	recover_beidou_information(pages[2],information); payload=information+38U;
+	assert(unpack_bits(payload,0U,4U)==3U);
+	assert(unpack_bits(payload,42U,24U)==UINT32_C(0x800000));
+	assert(unpack_bits(payload,66U,4U)==15U);
+	recover_beidou_information(pages[3],information); payload=information+38U;
+	assert(unpack_bits(payload,4U,18U)==UINT32_C(0x3ffff));
+	assert(unpack_bits(payload,22U,11U)==1023U && unpack_bits(payload,33U,5U)==19U);
+	assert(unpack_bits(payload,38U,16U)==UINT32_C(0x8000));
+	recover_beidou_information(pages[9],information); payload=information+38U;
+	assert(unpack_bits(information,18U,20U)==21U);
+	assert(unpack_bits(payload,0U,4U)==10U);
+	assert(unpack_bits(payload,4U,5U)==(UINT32_C(123456789)&31U));
+	assert(unpack_bits(payload,9U,14U)==UINT32_C(0x2000));
+	clock.af2=1024;
+	assert(gnss_beidou_d2_basic_pages(&clock,&ephemeris,0U,pages)==-1);
+}
+
 static uint32_t glonass_field(const uint8_t string[85], unsigned int first,
 	unsigned int width)
 {
@@ -758,6 +849,9 @@ static void test_rinex4_mixed_navigation(void)
 	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);
 	assert(radius > 2.0e7 && radius < 5.0e7);
 	strcpy(records[1].message, "D2");
+	assert(gnss_beidou_d1_ephemeris_from_rinex(&records[1],&beidou_ephemeris)==0);
+	assert(gnss_beidou_d1_clock_from_rinex(&records[1],zero_iono,zero_iono,
+		&beidou_clock)==0);
 	assert(gnss_propagate_kepler(&records[1], records[1].orbit[8] + 60.0, position,
 		velocity, &clock_bias, &clock_drift) == 0);
 	assert(isfinite(position[0]) && isfinite(position[1]) && isfinite(position[2]));
@@ -807,6 +901,8 @@ int main(void)
 	test_beidou_navigation_subframe();
 	test_beidou_d1_ephemeris();
 	test_beidou_d1_clock();
+	test_beidou_almanac_pages();
+	test_beidou_d2_basic_pages();
 	test_glonass_immediate_strings();
 	test_glonass_string5();
 	test_glonass_almanac_pair();

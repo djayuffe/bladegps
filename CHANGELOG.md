@@ -10,6 +10,14 @@
   relative-code/meander/time-mark formatting, and per-channel FDMA offsets.
 - Added split-block equivalence, invalid-state, passband, capacity-pressure, and
   constellation-specific RF-path regression tests.
+- Added D1 and D2 BeiDou almanac-page assembly with exact 186-bit ICD field
+  placement, two's-complement range checks, common BCH/interleaving, and strict
+  format-specific subframe/page schedules.
+- Added the ten D2 GEO basic-navigation pages with exact cross-page clock and
+  ephemeris field splits, reserved-bit handling, three-second page epochs, and
+  RINEX D2 conversion through the shared BeiDou quantizers.
+- Added active-channel-bank reconciliation that preserves every live signal phase
+  through mixed-constellation allocator updates and rejects duplicate identities.
 
 - Corrected the Galileo convolutional encoder register orientation against all
   three official OS SIS ICD 2.2 SSP symbol vectors.

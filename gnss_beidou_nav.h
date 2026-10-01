@@ -26,6 +26,22 @@ typedef struct {
 	int32_t af0, af1, af2;
 } beidou_d1_clock_t;
 
+typedef enum {
+	BEIDOU_NAV_D1 = 1,
+	BEIDOU_NAV_D2 = 2
+} beidou_nav_format_t;
+
+typedef struct {
+	uint32_t sqrt_a;
+	int16_t clock_rate, clock_bias;
+	int32_t omega0;
+	uint32_t eccentricity;
+	int16_t inclination_offset;
+	uint8_t toa;
+	int32_t omega_rate, argument_of_perigee, mean_anomaly;
+	uint8_t identifier;
+} beidou_almanac_t;
+
 /* D1 and D2 use the same 10-word BCH/interleaving structure. Inputs and output
  * are unpacked bits in MSB/transmission order. */
 int gnss_beidou_nav_encode_subframe(
@@ -49,5 +65,21 @@ int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *fields,
 	uint32_t frame_sow, uint8_t subframe1[BEIDOU_NAV_SUBFRAME_BITS]);
 int gnss_beidou_d1_clock_from_rinex(const gnss_nav_record_t *record,
 	const int8_t alpha[4], const int8_t beta[4], beidou_d1_clock_t *fields);
+
+/* Build an almanac page using the common ICD payload used by D1 and D2.
+ * D1 permits subframe 4 pages 1-24 and subframe 5 pages 1-6/11-23.
+ * D2 permits subframe 5 pages 37-60, 95-100 and 103-115. `identifier`
+ * carries the page's two-bit AmEpID/AmID value required by its schedule. */
+int gnss_beidou_almanac_subframe(beidou_nav_format_t format,
+	unsigned int fraid, unsigned int page, uint32_t sow,
+	const beidou_almanac_t *fields,
+	uint8_t subframe[BEIDOU_NAV_SUBFRAME_BITS]);
+
+/* Build the ten subframe-1 pages carrying a GEO satellite's D2 clock,
+ * ionosphere and ephemeris. frame_sow is page 1's frame epoch; later pages
+ * receive successive three-second frame epochs modulo one BDT week. */
+int gnss_beidou_d2_basic_pages(const beidou_d1_clock_t *clock,
+	const beidou_d1_ephemeris_t *ephemeris, uint32_t frame_sow,
+	uint8_t pages[10][BEIDOU_NAV_SUBFRAME_BITS]);
 
 #endif

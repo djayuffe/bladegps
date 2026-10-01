@@ -27,6 +27,12 @@ static void append_uint(uint8_t *bits, size_t *offset, uint32_t value,
 		bits[(*offset)++] = (uint8_t)((value >> (width - bit - 1U)) & 1U);
 }
 
+static void append_zeros(uint8_t *bits, size_t *offset, size_t width)
+{
+	memset(bits+*offset,0,width);
+	*offset+=width;
+}
+
 static int fits_signed(int32_t value, unsigned int width)
 {
 	int64_t limit = INT64_C(1) << (width - 1U);
@@ -150,6 +156,139 @@ int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *f,
 		gnss_beidou_nav_build_subframe(1U,sow,payload,subframe) : -1;
 }
 
+static int valid_almanac_page(beidou_nav_format_t format,
+	unsigned int fraid, unsigned int page)
+{
+	if(format==BEIDOU_NAV_D1)
+		return (fraid==4U && page>=1U && page<=24U) ||
+			(fraid==5U && ((page>=1U && page<=6U) ||
+			(page>=11U && page<=23U)));
+	if(format==BEIDOU_NAV_D2)
+		return fraid==5U && ((page>=37U && page<=60U) ||
+			(page>=95U && page<=100U) || (page>=103U && page<=115U));
+	return 0;
+}
+
+int gnss_beidou_almanac_subframe(beidou_nav_format_t format,
+	unsigned int fraid, unsigned int page, uint32_t sow,
+	const beidou_almanac_t *f, uint8_t subframe[300])
+{
+	uint8_t payload[BEIDOU_NAV_PAYLOAD_BITS]={0};
+	size_t at=0U;
+	if(f==NULL || subframe==NULL || sow>=604800U ||
+		!valid_almanac_page(format,fraid,page) || page>127U ||
+		f->sqrt_a>=(UINT32_C(1)<<24) ||
+		!fits_signed(f->clock_rate,11U) || !fits_signed(f->clock_bias,11U) ||
+		!fits_signed(f->omega0,24U) || f->eccentricity>=(UINT32_C(1)<<17) ||
+		!fits_signed(f->inclination_offset,16U) ||
+		!fits_signed(f->omega_rate,17U) ||
+		!fits_signed(f->argument_of_perigee,24U) ||
+		!fits_signed(f->mean_anomaly,24U) || f->identifier>3U) return -1;
+	append_uint(payload,&at,0U,1U);
+	append_uint(payload,&at,page,7U);
+	append_uint(payload,&at,f->sqrt_a,24U);
+	append_signed(payload,&at,f->clock_rate,11U);
+	append_signed(payload,&at,f->clock_bias,11U);
+	append_signed(payload,&at,f->omega0,24U);
+	append_uint(payload,&at,f->eccentricity,17U);
+	append_signed(payload,&at,f->inclination_offset,16U);
+	append_uint(payload,&at,f->toa,8U);
+	append_signed(payload,&at,f->omega_rate,17U);
+	append_signed(payload,&at,f->argument_of_perigee,24U);
+	append_signed(payload,&at,f->mean_anomaly,24U);
+	append_uint(payload,&at,f->identifier,2U);
+	return at==BEIDOU_NAV_PAYLOAD_BITS ?
+		gnss_beidou_nav_build_subframe(fraid,sow,payload,subframe) : -1;
+}
+
+static uint32_t signed_field(int32_t value, unsigned int width)
+{
+	uint32_t result=(uint32_t)value;
+	return width==32U?result:result&((UINT32_C(1)<<width)-1U);
+}
+
+static int build_d2_page(unsigned int page, uint32_t sow,
+	const beidou_d1_clock_t *c, const beidou_d1_ephemeris_t *e,
+	uint8_t subframe[300])
+{
+	uint8_t payload[BEIDOU_NAV_PAYLOAD_BITS]={0};
+	size_t at=0U;
+	uint32_t af1=signed_field(c->af1,22U),cuc=signed_field(e->cuc,18U);
+	uint32_t eccentricity=e->eccentricity,cic=signed_field(e->cic,18U);
+	uint32_t inclination=signed_field(e->inclination0,32U);
+	uint32_t omega_rate=signed_field(e->omega_rate,24U);
+	uint32_t argument=signed_field(e->argument_of_perigee,32U);
+	unsigned int index;
+	append_uint(payload,&at,page,4U);
+	switch(page) {
+	case 1U:
+		append_uint(payload,&at,c->health,1U); append_uint(payload,&at,c->aodc,5U);
+		append_uint(payload,&at,c->urai,4U); append_uint(payload,&at,c->week,13U);
+		append_uint(payload,&at,c->toc,17U); append_signed(payload,&at,c->tgd1,10U);
+		append_signed(payload,&at,c->tgd2,10U); append_uint(payload,&at,0U,12U);
+		break;
+	case 2U:
+		for(index=0U;index<4U;index++) append_signed(payload,&at,c->alpha[index],8U);
+		for(index=0U;index<4U;index++) append_signed(payload,&at,c->beta[index],8U);
+		append_uint(payload,&at,0U,8U); break;
+	case 3U:
+		append_zeros(payload,&at,38U); append_signed(payload,&at,c->af0,24U);
+		append_uint(payload,&at,af1>>18,4U); append_uint(payload,&at,0U,6U); break;
+	case 4U:
+		append_uint(payload,&at,af1&UINT32_C(0x3ffff),18U);
+		append_signed(payload,&at,c->af2,11U); append_uint(payload,&at,c->aode,5U);
+		append_signed(payload,&at,e->delta_mean_motion,16U);
+		append_uint(payload,&at,cuc>>4,14U); append_uint(payload,&at,0U,8U); break;
+	case 5U:
+		append_uint(payload,&at,cuc&15U,4U); append_signed(payload,&at,e->mean_anomaly,32U);
+		append_signed(payload,&at,e->cus,18U); append_uint(payload,&at,eccentricity>>22,10U);
+		append_uint(payload,&at,0U,8U); break;
+	case 6U:
+		append_uint(payload,&at,eccentricity&UINT32_C(0x3fffff),22U);
+		append_uint(payload,&at,e->sqrt_a,32U); append_uint(payload,&at,cic>>8,10U);
+		append_uint(payload,&at,0U,8U); break;
+	case 7U:
+		append_uint(payload,&at,cic&255U,8U); append_signed(payload,&at,e->cis,18U);
+		append_uint(payload,&at,e->toe,17U); append_uint(payload,&at,inclination>>11,21U);
+		append_uint(payload,&at,0U,8U); break;
+	case 8U:
+		append_uint(payload,&at,inclination&UINT32_C(0x7ff),11U);
+		append_signed(payload,&at,e->crc,18U); append_signed(payload,&at,e->crs,18U);
+		append_uint(payload,&at,omega_rate>>5,19U); append_uint(payload,&at,0U,6U); break;
+	case 9U:
+		append_uint(payload,&at,omega_rate&31U,5U); append_signed(payload,&at,e->omega0,32U);
+		append_uint(payload,&at,argument>>5,27U); append_uint(payload,&at,0U,8U); break;
+	case 10U:
+		append_uint(payload,&at,argument&31U,5U);
+		append_signed(payload,&at,e->inclination_rate,14U);
+		append_zeros(payload,&at,53U); break;
+	default: return -1;
+	}
+	return at==76U ? gnss_beidou_nav_build_subframe(1U,sow,payload,subframe) : -1;
+}
+
+int gnss_beidou_d2_basic_pages(const beidou_d1_clock_t *c,
+	const beidou_d1_ephemeris_t *e, uint32_t sow, uint8_t pages[10][300])
+{
+	unsigned int page,index;
+	if(c==NULL || e==NULL || pages==NULL || sow>=604800U || c->health>1U ||
+		c->aodc>31U || c->urai>15U || c->week>8191U || c->toc>75599U ||
+		!fits_signed(c->tgd1,10U) || !fits_signed(c->tgd2,10U) ||
+		!fits_signed(c->af0,24U) || !fits_signed(c->af1,22U) ||
+		!fits_signed(c->af2,11U) || c->aode>31U || e->toe>=(UINT32_C(1)<<17) ||
+		!fits_signed(e->delta_mean_motion,16U) || !fits_signed(e->cuc,18U) ||
+		!fits_signed(e->cus,18U) || !fits_signed(e->crc,18U) ||
+		!fits_signed(e->crs,18U) || !fits_signed(e->cic,18U) ||
+		!fits_signed(e->omega_rate,24U) || !fits_signed(e->cis,18U) ||
+		!fits_signed(e->inclination_rate,14U)) return -1;
+	for(index=0U;index<4U;index++)
+		if(!fits_signed(c->alpha[index],8U) || !fits_signed(c->beta[index],8U)) return -1;
+	for(page=1U;page<=10U;page++)
+		if(build_d2_page(page,(sow+(page-1U)*3U)%604800U,c,e,pages[page-1U])!=0)
+			return -1;
+	return 0;
+}
+
 static int64_t civil_days(int year, unsigned int month, unsigned int day)
 {
 	int y=year-(month<=2U); int era=(y>=0?y:y-399)/400;
@@ -187,7 +326,8 @@ int gnss_beidou_d1_clock_from_rinex(const gnss_nav_record_t *r,
 	int32_t value;
 	unsigned int index;
 	if(r==NULL||alpha==NULL||beta==NULL||f==NULL||r->system!=GNSS_SYSTEM_BEIDOU||
-		strcmp(r->message,"D1")!=0||r->orbit_count<26U) return -1;
+		(strcmp(r->message,"D1")!=0 && strcmp(r->message,"D2")!=0)||
+		r->orbit_count<26U) return -1;
 	memset(f,0,sizeof(*f));
 	for(index=0U;index<4U;index++){f->alpha[index]=alpha[index];f->beta[index]=beta[index];}
 	if(!isfinite(r->orbit[0])||!isfinite(r->orbit[18])||!isfinite(r->orbit[21])||
@@ -237,7 +377,8 @@ int gnss_beidou_d1_ephemeris_from_rinex(const gnss_nav_record_t *r,
 	const double pi = 3.14159265358979323846;
 	int32_t value;
 	if (r == NULL || f == NULL || r->system != GNSS_SYSTEM_BEIDOU ||
-		strcmp(r->message,"D1") != 0 || r->model != GNSS_NAV_KEPLERIAN ||
+		(strcmp(r->message,"D1") != 0 && strcmp(r->message,"D2") != 0) ||
+		r->model != GNSS_NAV_KEPLERIAN ||
 		r->orbit_count < 26U || !isfinite(r->orbit[8]) ||
 		r->orbit[8] < 0.0 || r->orbit[8] >= 604800.0) return -1;
 	memset(f,0,sizeof(*f));

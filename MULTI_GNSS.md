@@ -13,7 +13,7 @@ Only `gps-l1ca` has a production waveform backend. The other profiles are intent
 | Broadcast ephemeris parser | RINEX 2 production path; typed RINEX 3/4 LNAV reader added | Typed RINEX 3/4 INAV/FNAV reader added | Typed RINEX 3/4 D1/D2 reader added | Typed RINEX 3/4 FDMA reader added |
 | Orbit/clock model | Implemented | Broadcast Kepler/clock/relativity model added; channel integration pending | MEO/IGSO and GEO broadcast models added; channel integration pending | RK4 state-vector/J2/Earth-rotation model added; channel integration pending |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
-| Navigation message | GPS LNAV | I/NAV ephemeris word types 1-4 and service word type 5, RINEX-to-ICD quantization, nominal E1-B vertical-page assembly, CRC-24Q, ICD-oriented convolutional coding, 30x8 interleaving, sync insertion, SSP selection, and nominal word scheduling implemented; almanac/FEC2 words remain | Complete D1 subframes 1-3 are implemented with RINEX clock/ephemeris scaling, explicit header ionosphere inputs, BCH/interleaving, preamble/FraID/SOW and rollover handling; D1 almanac and D2 page payloads remain | Complete 15-string GNAV frames are assembled from RINEX-derived immediate strings 1-4, system-time string 5 and five almanac pairs with sign-magnitude fields, time mark and Hamming protection; RF relative/meander symbol formation remains |
+| Navigation message | GPS LNAV | I/NAV ephemeris word types 1-4 and service word type 5, RINEX-to-ICD quantization, nominal E1-B vertical-page assembly, CRC-24Q, ICD-oriented convolutional coding, 30x8 interleaving, sync insertion, SSP selection, and nominal word scheduling implemented; almanac/FEC2 words remain | Complete D1 subframes 1-3, D2 GEO basic-navigation pages 1-10, and shared D1/D2 186-bit almanac pages are implemented with schedule validation, RINEX D1/D2 scaling, explicit ionosphere inputs, BCH/interleaving, preamble/FraID/SOW and rollover handling; D2 integrity, ionosphere-grid and time-offset service pages remain | Complete 15-string GNAV frames are assembled from RINEX-derived immediate strings 1-4, system-time string 5 and five almanac pairs with sign-magnitude fields, time mark and Hamming protection |
 | Modulation/mixer | Production BPSK(1) | Sample-level E1-B/E1-C CBOC mixer implemented with continuous code/data/pilot-secondary/carrier phase; runtime scheduler pending | Sample-level BPSK mixer and 1 kchip/s D1 NH overlay implemented; D1/D2 runtime scheduler pending | Relative-code/meander/time-mark formatter and per-slot continuous-phase FDMA mixer implemented; runtime scheduler pending |
 | Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
 
@@ -45,6 +45,11 @@ satellites, elevations below the mask, and signals whose occupied bandwidth does
 not fit the complex sampled passband. Survivors are selected deterministically in
 descending elevation order. For GLONASS, the candidate carrier is the individual
 FDMA slot frequency, not the 1602 MHz nominal center.
+
+After selection, `gnss_rf_reconcile()` rebuilds the active channel bank while
+preserving carrier, code, data, and overlay phases for unchanged signals. This
+keeps mixed-constellation allocation stable when satellites rise, set, become
+unhealthy, or cross the configured elevation mask.
 
 ## Band planning
 

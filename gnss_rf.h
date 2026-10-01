@@ -61,4 +61,10 @@ int gnss_rf_allocate(const gnss_rf_candidate_t *candidates, size_t candidate_cou
 	double center_hz, double sample_rate_hz, double elevation_mask_rad,
 	size_t *selected_indices, size_t selected_capacity, size_t *selected_count);
 
+/* Replace an active mixed-constellation channel bank while preserving all
+ * tracking phases for unchanged signals. Desired channels must be unique by
+ * constellation/PRN/carrier and may not alias the active bank. */
+int gnss_rf_reconcile(gnss_rf_channel_t *active, size_t active_capacity,
+	const gnss_rf_channel_t *desired, size_t desired_count);
+
 #endif

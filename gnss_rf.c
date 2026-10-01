@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gnss_codes.h"
@@ -140,6 +141,47 @@ int gnss_rf_allocate(const gnss_rf_candidate_t *candidates, size_t count,
 		if(used<capacity) used++;
 	}
 	*selected_count=used; return 0;
+}
+
+static int same_signal(const gnss_rf_channel_t *a, const gnss_rf_channel_t *b)
+{
+	return a->enabled && b->enabled && a->system==b->system && a->prn==b->prn &&
+		a->modulation==b->modulation && a->carrier_hz==b->carrier_hz &&
+		a->code_length==b->code_length && a->code_rate_hz==b->code_rate_hz &&
+		a->data_symbol_count==b->data_symbol_count && a->data_rate_hz==b->data_rate_hz &&
+		a->overlay_symbol_count==b->overlay_symbol_count &&
+		a->overlay_rate_hz==b->overlay_rate_hz;
+}
+
+int gnss_rf_reconcile(gnss_rf_channel_t *active, size_t capacity,
+	const gnss_rf_channel_t *desired, size_t count)
+{
+	gnss_rf_channel_t *next;
+	size_t index,old,other;
+	if(active==NULL || capacity==0U || count>capacity ||
+		(count>0U && desired==NULL) || desired==active) return -1;
+	for(index=0U;index<count;index++) {
+		if(!desired[index].enabled) return -1;
+		for(other=0U;other<index;other++)
+			if(desired[index].system==desired[other].system &&
+				desired[index].prn==desired[other].prn &&
+				desired[index].carrier_hz==desired[other].carrier_hz) return -1;
+	}
+	next=calloc(capacity,sizeof(*next));
+	if(next==NULL) return -1;
+	for(index=0U;index<count;index++) {
+		next[index]=desired[index];
+		for(old=0U;old<capacity;old++) if(same_signal(&active[old],&desired[index])) {
+			next[index].carrier_phase=active[old].carrier_phase;
+			next[index].code_phase=active[old].code_phase;
+			next[index].data_phase=active[old].data_phase;
+			next[index].overlay_phase=active[old].overlay_phase;
+			break;
+		}
+	}
+	memcpy(active,next,capacity*sizeof(*active));
+	free(next);
+	return 0;
 }
 
 int gnss_rf_bits_to_symbols(const uint8_t *bits, size_t count, int8_t *symbols)
