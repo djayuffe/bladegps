@@ -6,7 +6,7 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 
 ## Features
 
-- GPS L1 C/A baseband generation with up to 16 simulated channels.
+- GPS L1 C/A PRN 1-37 baseband generation with up to 16 simulated channels.
 - Galileo E1-B/E1-C CBOC, BeiDou B1I D1/D2 BPSK, and GLONASS L1OF FDMA generation.
 - Mixed RINEX 3/4 navigation ingestion with constellation-specific orbit, clock,
   navigation-message, code, modulation, visibility, Doppler, and allocation paths.
@@ -15,21 +15,29 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Dynamic receiver mode from geodetic latitude/longitude/height CSV files.
 - Dynamic receiver mode from NMEA GGA streams.
 - Optional keyboard-controlled interactive motion mode.
+- Optional live SDL2 USB/Bluetooth game-controller receiver motion.
+- Timestamp-aware 10 Hz interpolation of ECEF, geodetic, and NMEA motion.
 - RINEX broadcast navigation file parsing.
 - Direct POSIX streaming of plain, `.gz`, and legacy Unix-compressed `.Z` RINEX 2 files.
 - Per-satellite ephemeris selection and seamless 30-second ephemeris refresh.
 - Iterative signal transit-time and Earth-rotation (Sagnac) correction.
-- Satellite clock bias, relativistic correction, TGD, and clock-drift modeling.
+- GPS/GST/BDT/GLONASS-UTC conversion with historical leap-second handling.
+- Per-satellite transmit-time navigation-symbol/overlay alignment.
+- Satellite clock bias, relativistic correction, signal group delay, and clock-drift modeling.
 - Automatic daily GPS broadcast ephemeris download with NOAA/NGS primary and BKG IGS fallback sources when `-e` is omitted.
 - Capability-driven bladeRF 1.0/2.0 adaptation for center frequency, exact sample rate, analog bandwidth, and portable overall TX gain.
 - Hardware range checks and configuration read-back before RF transmission.
 - Analog-filter validation against the complete occupied signal span, including an offset carrier.
-- SC16 Q11 peak/rail telemetry and deterministic zero-padded final-buffer flushing.
+- Deterministic SC16 Q11 headroom normalization, peak/rail telemetry, and zero-padded final-buffer flushing.
 - Signal registry and RF validation for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF.
 - Real-time SC16 I/Q streaming to bladeRF.
 - Optional XB200 setup for GPS-band transmit filtering/path selection.
 - Graceful generator/TX error propagation and `SIGINT`/`SIGTERM` shutdown.
-- Deterministic core tests for time, coordinates, C/A code, and ephemeris selection.
+- A true `mixed-open` runtime that jointly allocates and renders GPS L1 C/A,
+  Galileo E1, BeiDou B1I, and GLONASS L1OF from one mixed navigation file.
+- Independent software BPSK acquisition/correlation loopback validation.
+- Deterministic core tests for system time, leap seconds, transmit alignment,
+  coordinates, PRN codes, navigation coding, RF continuity, motion, and selection.
 - Portable Makefile that uses `pkg-config libbladeRF` when available, with the original adjacent bladeRF source-tree fallback.
 
 ## Requirements
@@ -40,6 +48,7 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - A bladeRF device supported by libbladeRF.
 - `pkg-config` is recommended so the Makefile can discover libbladeRF automatically.
 - `curl` and `gzip` are required only when using automatic ephemeris download.
+- SDL2 is optional; when found through `pkg-config`, `-j` live controller input is enabled.
 
 On macOS with MacPorts, for example, the build can use libbladeRF from `/opt/local` through `pkg-config`. On Linux, install libbladeRF development files through your package manager or build them from Nuand's source tree.
 
@@ -95,7 +104,7 @@ Options:
   -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss
   -d <duration>    Duration [sec] (max: 86400)
   -x <XB number>   Enable XB board, e.g. '-x 200' for XB200
-  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of)
+  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of, mixed-open)
   -L               List signal profiles and implementation status
   -D <device>      libbladeRF device identifier
   -f <Hz>          TX center frequency
@@ -106,6 +115,7 @@ Options:
   -A <dB>          Legacy bladeRF 1 TXVGA2 gain (requires -a)
   -M <degrees>     Satellite elevation mask (-90 to 90)
   -i               Interactive mode: North='w', South='s', East='d', West='a', Up='e', Down='q'
+  -j <index>       Live SDL USB/Bluetooth controller (left stick NE, right stick vertical)
 ```
 
 Static location example:
@@ -134,6 +144,19 @@ Galileo example using a mixed RINEX 3/4 navigation file:
 Use `-S beidou-b1i` or `-S glonass-l1of` for those integrated backends. The
 selected center frequency, sample rate, and bandwidth default to the profile's
 safe values and can be overridden with `-f`, `-r`, and `-b`.
+
+Simultaneous open-service example (wideband hardware and a mixed RINEX 3/4 file):
+
+```sh
+./bladegps -S mixed-open -e BRDC00IGS_R_20262740000_01D_MN.rnx \
+  -l 59.3293,18.0686,30 -d 60
+```
+
+The default mixed plan is centered at 1582.3925 MHz with 48 Msps and 47.1 MHz
+analog bandwidth. The allocator considers all four constellations together and
+keeps the 16 highest-elevation healthy signals that fit the realized device
+passband. Device range checks can reject this plan on hardware that cannot
+provide the required instantaneous bandwidth.
 
 ### Hardware adaptation and RF filtering
 
@@ -208,6 +231,9 @@ time_seconds,ecef_x_m,ecef_y_m,ecef_z_m
 Records are consumed at 10 Hz. All four CSV fields must be finite numbers;
 malformed records are rejected instead of silently shortening the scenario.
 NMEA input accepts valid GGA fixes and ignores no-fix records.
+Checksummed sentences are verified; timestamps are unwrapped across midnight.
+All recorded motion formats are linearly resampled to the simulator's 100 ms
+clock, so irregular input spacing no longer changes simulated speed.
 
 Geodetic motion rows use decimal degrees and metres:
 
@@ -217,27 +243,44 @@ time_seconds,latitude_degrees,longitude_degrees,height_metres
 
 Latitude is limited to -90..90 degrees and longitude to -180..180 degrees. Records are converted to ECEF before signal generation.
 
+Live controller example:
+
+```sh
+./bladegps -S gps-l1ca -l 59.3293,18.0686,30 -j 0 -d 120
+```
+
+The left stick commands north/east velocity and the right-stick vertical axis
+commands up/down velocity. Dead-zone removal and diagonal normalization are
+applied. Disconnecting the controller stops generation with an error rather
+than freezing the last velocity.
+
 ## Signal support
 
 | Profile | Constellation | Nominal carrier | Status | Notes |
 | --- | --- | ---: | --- | --- |
-| `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-32 |
+| `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-37 |
 | `galileo-e1` | Galileo | 1575.42 MHz | Software implemented | E1-B/C codes, CBOC, mixed-RINEX orbit/clock, scheduled I/NAV ephemeris/service pages, dummy substitution for unavailable optional service words, geometry, allocation and RF synthesis |
 | `beidou-b1i` | BeiDou | 1561.098 MHz | Software implemented | PRN 1–63 codes, D1/D2 selection, ephemeris/clock/ionosphere pages, geometry, NH overlay, allocation and RF synthesis |
 | `glonass-l1of` | GLONASS | 1602 MHz base | Software implemented | L1OF code, FDMA slot carriers, state-vector propagation, immediate GNAV/time strings, safe unavailable-almanac marking, relative/meander modulation and RF synthesis |
+| `mixed-open` | GPS + Galileo + BeiDou + GLONASS | 1582.3925 MHz plan center | Software implemented | One mixed RINEX input, constellation-native timing, shared health/elevation allocator, 16-channel continuous wideband mixer |
 
 Unknown or non-implemented profiles fail closed instead of silently producing a GPS waveform. Non-GPS paths consume either a supplied or automatically downloaded mixed RINEX 3/4 navigation file. See [MULTI_GNSS.md](MULTI_GNSS.md) for the exact payload boundaries and validation status.
 
 The source tree contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping.
 
-The typed RINEX 3/4 loader, Galileo/BeiDou Keplerian propagation, BeiDou GEO transform, GLONASS state-vector propagation, navigation scheduling, modulation, channel allocation and FIFO producer are connected to RF output. The CLI selects one signal profile per run; `gnss_rf` is constellation-neutral but the command-line producer does not yet combine GPS/Galileo/BeiDou/GLONASS profiles in one transmission. Hardware/receiver validation remains environment-dependent and is not claimed by the software tests.
+The typed RINEX 3/4 loader, GPS LNAV adapter, Galileo/BeiDou Keplerian propagation,
+BeiDou GEO transform, GLONASS state-vector propagation, navigation scheduling,
+modulation, joint channel allocation, and FIFO producer are connected to
+`mixed-open` RF output. Software loopback validates independent BPSK acquisition;
+physical hardware and receiver certification remain environment-dependent.
 
 ## Implementation notes
 
 - The simulator generates 0.1 second blocks at the selected sample rate for bladeRF SC16 transmission; GPS defaults to 2.6 Msps.
 - The requested duration emits the complete number of 100 ms blocks.
-- The closest in-fit broadcast record is selected independently per PRN and refreshed at navigation-frame boundaries.
-- Non-GPS ephemeris selection compares complete GPS-aligned calendar weeks, so a record from an older week cannot win merely because it has the same seconds-of-week.
+- The newest healthy in-fit broadcast record already in force is selected independently per constellation/PRN; unhealthy or arbitrary future records cannot mask usable data.
+- Record age is compared in continuous GPS time after native GPS/GST/BDT/UTC conversion.
+- Navigation data and overlay phases use iterative per-satellite transmit time rather than receiver time.
 - Non-GPS 30-second navigation cycles are regenerated at every cycle boundary; Galileo GST TOW and BeiDou BDT SOW therefore advance instead of repeating a cached frame.
 - Mixed RINEX files are counted and allocated dynamically; there is no fixed 4096-record truncation ceiling.
 - BeiDou Klobuchar coefficients are read from RINEX 3 `BDSA`/`BDSB` headers or RINEX 4 `ION C ... D1D2` records and range-checked at their ICD scales.

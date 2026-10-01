@@ -528,7 +528,7 @@ void usage(void)
 		"  -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss\n"
 		"  -d <duration>    Duration [sec] (max: %.0f)\n"
 		"  -x <XB number>   Enable XB board, e.g. '-x 200' for XB200\n"
-		"  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of)\n"
+		"  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of, mixed-open)\n"
 		"  -L               List signal profiles and implementation status\n"
 		"  -D <device>      libbladeRF device identifier\n"
 		"  -f <Hz>          TX center frequency\n"
@@ -538,7 +538,8 @@ void usage(void)
 		"  -a <dB>          Legacy bladeRF 1 TXVGA1 gain (requires -A)\n"
 		"  -A <dB>          Legacy bladeRF 1 TXVGA2 gain (requires -a)\n"
 		"  -M <degrees>     Satellite elevation mask (-90 to 90)\n"
-		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n",
+		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n"
+		"  -j <index>       Live SDL USB/Bluetooth game controller index (left stick NE, right stick up/down)\n",
 		((double)USER_MOTION_SIZE)/10.0, DEFAULT_TX_GAIN,
 		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY, UP_KEY, DOWN_KEY);
 
@@ -602,8 +603,9 @@ int main(int argc, char *argv[])
 	s.opt.llh[1] = 137.013765 / R2D;
 	s.opt.llh[2] = 100.0;
 	s.opt.interactive = FALSE;
+	s.opt.controller_index = -1;
 
-	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:iS:LD:f:r:b:G:a:A:M:"))!=-1)
+	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:ij:S:LD:f:r:b:G:a:A:M:"))!=-1)
 	{
 		switch (result)
 		{
@@ -673,6 +675,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			s.opt.interactive = TRUE;
+			break;
+		case 'j':
+			if(parse_int_option(optarg,0,255,&s.opt.controller_index)!=0){
+				fprintf(stderr,"ERROR: Invalid controller index.\n");exit(1);}
 			break;
 		case 'S':
 			if (gnss_signal_parse(optarg, &s.opt.signal) != 0) {

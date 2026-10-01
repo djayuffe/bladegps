@@ -40,6 +40,32 @@ static void test_time_conversions(void)
 	normalizeGpsTime(&rollover);
 	assert(rollover.week == 2201);
 	assert(fabs(rollover.sec - 1.25) < 1.0e-12);
+	{
+		gnss_calendar_time_t before={2016,12,31,23,59,59.0};
+		gnss_calendar_time_t leap={2016,12,31,23,59,60.0};
+		gnss_calendar_time_t after={2017,1,1,0,0,0.0};
+		gnss_calendar_time_t ordinary={2021,7,5,2,0,0.0};
+		gpstime_t gb,gl,ga,gps,galileo,beidou,glonass;
+		int offset;
+		assert(gnss_gps_utc_offset(&before,&offset)==0 && offset==17);
+		assert(gnss_gps_utc_offset(&after,&offset)==0 && offset==18);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&before,&gb)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&leap,&gl)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&after,&ga)==0);
+		assert(fabs(gnss_time_difference(&gl,&gb)-1.0)<1.0e-12);
+		assert(fabs(gnss_time_difference(&ga,&gl)-1.0)<1.0e-12);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GPS,&ordinary,&gps)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GALILEO,&ordinary,&galileo)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_BEIDOU,&ordinary,&beidou)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&ordinary,&glonass)==0);
+		assert(gnss_time_difference(&galileo,&gps)==0.0);
+		assert(gnss_time_difference(&beidou,&gps)==14.0);
+		assert(gnss_time_difference(&glonass,&gps)==18.0);
+		assert(gnss_gps_to_system_time(GNSS_SYSTEM_BEIDOU,&beidou,&galileo)==0);
+		assert(gnss_time_difference(&galileo,&gps)==0.0);
+		assert(gnss_gps_to_system_time(GNSS_SYSTEM_GLONASS,&glonass,&galileo)==0);
+		assert(gnss_time_difference(&galileo,&gps)==0.0);
+	}
 }
 
 static void test_coordinate_round_trip(void)
@@ -68,6 +94,11 @@ static void test_ca_code_balance(void)
 		ones += ca[i];
 	}
 	assert(ones == 512);
+	memset(ca,0,sizeof(ca));
+	codegen(ca,37);
+	ones=0;
+	for(i=0;i<CA_SEQ_LEN;i++){assert(ca[i]==0||ca[i]==1);ones+=ca[i];}
+	assert(ones==512);
 }
 
 static void test_ephemeris_selection(void)
@@ -92,6 +123,14 @@ static void test_ephemeris_selection(void)
 
 	assert(selectEphemerides(selected, source, 2, now) == 1);
 	assert(selected[0].iode == 2);
+	source[1][0].sv_health=1;
+	assert(selectEphemerides(selected,source,2,now)==1);
+	assert(selected[0].iode==1);
+	source[1][0].sv_health=0;
+	source[1][0].toe.sec=now.sec+100.0;
+	assert(selectEphemerides(selected,source,2,now)==1);
+	assert(selected[0].iode==1);
+	source[1][0].toe.sec=100000.0;
 
 	now.sec += DEFAULT_EPHEMERIS_FIT_HOURS * SECONDS_IN_HOUR / 2.0 + 1000.0;
 	assert(selectEphemerides(selected, source, 2, now) == 0);
@@ -108,9 +147,37 @@ static void test_signal_profiles(void)
 	assert(profile != NULL && profile->waveform_implemented == 1);
 	assert(gnss_signal_parse("galileo-e1", &signal) == 0);
 	assert(gnss_signal_profile(signal)->system == GNSS_SYSTEM_GALILEO);
+	assert(gnss_signal_parse("mixed-open",&signal)==0);
+	assert(signal==GNSS_SIGNAL_MIXED_OPEN&&gnss_signal_profile(signal)->minimum_sample_rate_hz==48.0e6);
 	assert(gnss_signal_parse("invalid", &signal) == -1);
 	assert(gnss_frequency_fits(1575.42e6, 5.0e6, 1575.42e6, 4.0e6));
 	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
+}
+
+static void test_independent_receiver_loopback(void)
+{
+	int8_t code[31],symbol[1]={1};
+	int16_t iq[620];
+	gnss_rf_channel_t channel={0};
+	gnss_rx_acquisition_t acquisition;
+	unsigned int state=0x1fU;
+	size_t index;
+	for(index=0U;index<31U;index++) {
+		unsigned int feedback=((state>>4U)^(state>>1U))&1U;
+		code[index]=(state&1U)!=0U?1:-1;
+		state=((state<<1U)&0x1fU)|feedback;
+	}
+	channel.enabled=1;channel.modulation=GNSS_RF_BPSK;channel.system=GNSS_SYSTEM_GPS;
+	channel.prn=1U;channel.carrier_hz=1001000.0;channel.amplitude=1000.0;
+	channel.data_code=code;channel.code_length=31U;channel.code_rate_hz=3100.0;
+	channel.code_phase=7.0;channel.data_symbols=symbol;channel.data_symbol_count=1U;
+	channel.data_rate_hz=10.0;
+	assert(gnss_rf_render(&channel,1U,1000000.0,31000.0,iq,310U)==0);
+	assert(gnss_rx_acquire_bpsk(iq,310U,31000.0,code,31U,3100.0,
+		0.0,2000.0,500.0,&acquisition)==0);
+	assert(acquisition.carrier_offset_hz==1000.0);
+	assert(acquisition.code_phase_chips==7U);
+	assert(acquisition.normalized_correlation>0.94);
 }
 
 static void test_bladerf_hardware_helpers(void)
@@ -241,6 +308,22 @@ static void test_constellation_rf_sequences(void)
 		double expected=500.0*(galileo_b[0]*(alpha+beta)-
 			galileo_c[0]*galileo_secondary[0]*(alpha-beta))/sqrt(2.0);
 		assert(iq[0]==(int16_t)lrint(expected) && iq[1]==0);
+	}
+	{
+		gnss_rf_channel_t bank[16];
+		unsigned int peak=0U;
+		for(index=0U;index<16U;index++) {
+			bank[index]=channel;bank[index].prn=(unsigned int)index+1U;
+			bank[index].amplitude=500.0;bank[index].code_phase=0.0;
+			bank[index].data_phase=0.0;bank[index].overlay_phase=0.0;
+			bank[index].carrier_phase=0.0;
+		}
+		assert(gnss_rf_render(bank,16U,1575.42e6,5.0e6,iq,128U)==0);
+		for(index=0U;index<256U;index++) {
+			unsigned int magnitude=(unsigned int)(iq[index]<0?-(int)iq[index]:iq[index]);
+			if(magnitude>peak)peak=magnitude;
+		}
+		assert(peak<=1801U);
 	}
 
 	assert(gnss_beidou_b1i_code(1U,beidou)==0);
@@ -821,6 +904,17 @@ static void test_llh_motion(void)
 	assert(fabs(llh[2] - 30.0) < 1.0e-3);
 }
 
+static void test_timed_motion_resampling(void)
+{
+	double storage[4][3]={{0}};
+	double *rows[4]={storage[0],storage[1],storage[2],storage[3]};
+	assert(readUserMotion(rows,"tests/ecef_motion.csv")==3);
+	assert(fabs(rows[0][0])<1.0e-12);
+	assert(fabs(rows[1][0]-1.0)<1.0e-12);
+	assert(fabs(rows[1][1]-2.0)<1.0e-12);
+	assert(fabs(rows[2][2]-6.0)<1.0e-12);
+}
+
 static void test_rinex4_mixed_navigation(void)
 {
 	gnss_nav_record_t records[4];
@@ -891,6 +985,9 @@ static void test_rinex4_mixed_navigation(void)
 	assert(observation.geometric_range_m>1.0e7 && observation.geometric_range_m<5.0e7);
 	assert(observation.code_phase_chips>=0.0 &&
 		observation.code_phase_chips<GALILEO_E1_CODE_LENGTH);
+	assert(observation.transmit_sow<records[0].orbit[8]);
+	assert(observation.travel_time_s>0.05&&observation.travel_time_s<0.2);
+	assert(fabs(observation.signal_group_delay_s-records[0].orbit[22])<1.0e-18);
 	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
 	assert(strcmp(records[1].message, "D1") == 0);
 	assert(records[1].orbit_count == 26U);
@@ -998,6 +1095,7 @@ static void test_non_gps_producer_block(void)
 	size_t index;
 	int nonzero=0;
 	memset(&sim,0,sizeof(sim));
+	sim.opt.controller_index=-1;
 	sim.opt.signal=GNSS_SIGNAL_GALILEO_E1;
 	strcpy(sim.opt.navfile,"tests/rinex4_mixed.nav");
 	sim.opt.staticLocationMode=1; sim.opt.llh[0]=59.3293/R2D;
@@ -1027,6 +1125,7 @@ static void test_non_gps_rejects_stale_navigation(void)
 {
 	sim_t sim;
 	memset(&sim,0,sizeof(sim));
+	sim.opt.controller_index=-1;
 	sim.opt.signal=GNSS_SIGNAL_GALILEO_E1;
 	strcpy(sim.opt.navfile,"tests/rinex4_mixed.nav");
 	sim.opt.staticLocationMode=1;sim.opt.llh[0]=59.3293/R2D;
@@ -1049,6 +1148,27 @@ static void test_non_gps_rejects_stale_navigation(void)
 	free(sim.fifo);
 }
 
+static void test_mixed_runtime_gps_backend(void)
+{
+	sim_t sim;size_t index;int nonzero=0;
+	memset(&sim,0,sizeof(sim));sim.opt.controller_index=-1;
+	sim.opt.signal=GNSS_SIGNAL_MIXED_OPEN;strcpy(sim.opt.navfile,"tests/rinex4_gps.nav");
+	sim.opt.staticLocationMode=1;sim.opt.llh[0]=59.3293/R2D;
+	sim.opt.llh[1]=18.0686/R2D;sim.opt.llh[2]=30.0;sim.opt.g0.week=-1;
+	sim.opt.iduration=1;sim.opt.elevation_mask=-90.0;sim.opt.tx_frequency=1575420000U;
+	sim.opt.tx_sample_rate=2600000U;sim.iq_block_samples=260000U;sim.fifo_length=520000U;
+	sim.fifo=calloc(sim.fifo_length*2U,sizeof(*sim.fifo));assert(sim.fifo!=NULL);
+	assert(pthread_mutex_init(&sim.gps.lock,NULL)==0);
+	assert(pthread_cond_init(&sim.gps.initialization_done,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_read_ready,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_write_ready,NULL)==0);
+	assert(gnss_task(&sim)==NULL);assert(sim.gps.ready==1&&sim.gps.error==0&&sim.finished);
+	for(index=0U;index<sim.iq_block_samples*2U;index++)nonzero+=sim.fifo[index]!=0;
+	assert(nonzero>1000);
+	pthread_cond_destroy(&sim.fifo_write_ready);pthread_cond_destroy(&sim.fifo_read_ready);
+	pthread_cond_destroy(&sim.gps.initialization_done);pthread_mutex_destroy(&sim.gps.lock);free(sim.fifo);
+}
+
 int main(void)
 {
 	test_time_conversions();
@@ -1056,6 +1176,7 @@ int main(void)
 	test_ca_code_balance();
 	test_ephemeris_selection();
 	test_signal_profiles();
+	test_independent_receiver_loopback();
 	test_bladerf_hardware_helpers();
 	test_rf_renderer_and_allocator();
 	test_constellation_rf_sequences();
@@ -1073,9 +1194,11 @@ int main(void)
 	test_glonass_almanac_pair();
 	test_glonass_frame();
 	test_llh_motion();
+	test_timed_motion_resampling();
 	test_rinex4_mixed_navigation();
 	test_non_gps_producer_block();
 	test_non_gps_rejects_stale_navigation();
+	test_mixed_runtime_gps_backend();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif

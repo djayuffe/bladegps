@@ -150,14 +150,14 @@ void codegen(int *ca, int prn)
 		  5,   6,   7,   8,  17,  18, 139, 140, 141, 251,
 		252, 254, 255, 256, 257, 258, 469, 470, 471, 472,
 		473, 474, 509, 512, 513, 514, 515, 516, 859, 860,
-		861, 862};
+		861, 862, 863, 950, 947, 948, 950};
 	
 	int g1[CA_SEQ_LEN], g2[CA_SEQ_LEN];
 	int r1[N_DWRD_SBF], r2[N_DWRD_SBF];
 	int c1, c2;
 	int i,j;
 
-	if (prn<1 || prn>32)
+	if (prn<1 || prn>MAX_SAT)
 		return;
 
 	for (i=0; i<N_DWRD_SBF; i++)
@@ -780,10 +780,15 @@ int selectEphemerides(ephem_t selected[MAX_SAT],
 			double age;
 			double fit_hours;
 
-			if (source[set][sv].vflg != 1)
+			if (source[set][sv].vflg != 1 || source[set][sv].sv_health != 0)
 				continue;
 
-			age = fabs(subGpsTime(time, source[set][sv].toe));
+			age = subGpsTime(time, source[set][sv].toe);
+			/* Do not pull an ephemeris arbitrarily from the future.  Thirty
+			 * seconds allows for a rounded message boundary in archived files. */
+			if (age < -30.0)
+				continue;
+			age = fabs(age);
 			fit_hours = source[set][sv].fit_interval > 0.0 ?
 				source[set][sv].fit_interval : DEFAULT_EPHEMERIS_FIT_HOURS;
 			if (age > fit_hours * SECONDS_IN_HOUR / 2.0)
@@ -1363,18 +1368,34 @@ void computeCodePhase(channel_t *chan, range_t rho1, double dt)
  *  \returns Number of user data motion records read, -1 on error
  */
 
+static int append_motion_segment(double **xyz,int *count,double output_time,
+	double previous_time,const double previous[3],double current_time,
+	const double current[3])
+{
+	double alpha;
+	if(current_time<=previous_time||!isfinite(output_time))return -1;
+	while(*count<USER_MOTION_SIZE&&output_time<=current_time+1.0e-9) {
+		int axis;
+		alpha=(output_time-previous_time)/(current_time-previous_time);
+		if(alpha<0.0)alpha=0.0;if(alpha>1.0)alpha=1.0;
+		for(axis=0;axis<3;axis++)xyz[*count][axis]=previous[axis]+alpha*(current[axis]-previous[axis]);
+		(*count)++;output_time+=0.1;
+	}
+	return 0;
+}
+
 //int readUserMotion(double xyz[USER_MOTION_SIZE][3], const char *filename)
 int readUserMotion(double **xyz, const char *filename)
 {
 	FILE *fp;
-	int numd;
+	int numd=0,have_previous=0;
 	char str[MAX_CHAR];
-	double t,x,y,z;
+	double t,x,y,z,start_time=0.0,previous_time=0.0,previous[3]={0};
 
 	if (NULL==(fp=fopen(filename,"rt")))
 		return(-1);
 
-	for (numd=0; numd<USER_MOTION_SIZE; numd++)
+	while(numd<USER_MOTION_SIZE)
 	{
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
@@ -1385,9 +1406,17 @@ int readUserMotion(double **xyz, const char *filename)
 			return -2;
 		}
 
-		xyz[numd][0] = x;
-		xyz[numd][1] = y;
-		xyz[numd][2] = z;
+		if(!have_previous) {
+			start_time=previous_time=t;previous[0]=xyz[0][0]=x;
+			previous[1]=xyz[0][1]=y;previous[2]=xyz[0][2]=z;
+			numd=1;have_previous=1;continue;
+		}
+		{
+			double current[3]={x,y,z};
+			if(append_motion_segment(xyz,&numd,start_time+0.1*(double)numd,
+				previous_time,previous,t,current)!=0){fclose(fp);return -2;}
+			previous_time=t;memcpy(previous,current,sizeof(previous));
+		}
 	}
 
 	fclose(fp);
@@ -1398,15 +1427,15 @@ int readUserMotion(double **xyz, const char *filename)
 int readLlhMotion(double **xyz, const char *filename)
 {
 	FILE *fp;
-	int numd;
+	int numd=0,have_previous=0;
 	char str[MAX_CHAR];
 	double time_seconds,latitude,longitude,height;
-	double llh[3];
+	double llh[3],current[3],previous[3]={0},start_time=0.0,previous_time=0.0;
 
 	if (NULL==(fp=fopen(filename,"rt")))
 		return -1;
 
-	for (numd=0; numd<USER_MOTION_SIZE; numd++) {
+	while(numd<USER_MOTION_SIZE) {
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
 		if (sscanf(str, "%lf,%lf,%lf,%lf", &time_seconds, &latitude,
@@ -1419,11 +1448,41 @@ int readLlhMotion(double **xyz, const char *filename)
 		llh[0] = latitude/R2D;
 		llh[1] = longitude/R2D;
 		llh[2] = height;
-		llh2xyz(llh, xyz[numd]);
+		llh2xyz(llh,current);
+		if(!have_previous){start_time=previous_time=time_seconds;
+			memcpy(previous,current,sizeof(previous));memcpy(xyz[0],current,sizeof(current));
+			numd=1;have_previous=1;continue;}
+		if(append_motion_segment(xyz,&numd,start_time+0.1*(double)numd,
+			previous_time,previous,time_seconds,current)!=0){fclose(fp);return -2;}
+		previous_time=time_seconds;memcpy(previous,current,sizeof(previous));
 	}
 
 	fclose(fp);
 	return numd;
+}
+
+static int nmea_checksum_valid(const char *sentence)
+{
+	const char *star;
+	unsigned int expected,value=0U;
+	if(sentence==NULL||sentence[0]!='$')return 0;
+	star=strchr(sentence,'*');
+	if(star==NULL)return 1;
+	if(sscanf(star+1,"%2x",&expected)!=1)return 0;
+	for(sentence++;sentence<star;sentence++)value^=(unsigned char)*sentence;
+	return value==expected;
+}
+
+static int nmea_time_seconds(const char *text,double *seconds)
+{
+	double raw,sec;
+	int hour,minute;
+	char *end;
+	if(text==NULL||seconds==NULL)return -1;
+	raw=strtod(text,&end);if(end==text||!isfinite(raw))return -1;
+	hour=(int)(raw/10000.0);minute=(int)(raw/100.0)%100;sec=fmod(raw,100.0);
+	if(hour<0||hour>23||minute<0||minute>59||sec<0.0||sec>=61.0)return -1;
+	*seconds=(double)hour*3600.0+(double)minute*60.0+sec;return 0;
 }
 
 //int readNmeaGGA(double xyz[USER_MOTION_SIZE][3], const char *filename)
@@ -1436,6 +1495,8 @@ int readNmeaGGA(double **xyz, const char *filename)
 	double llh[3],pos[3];
 	char tmp[8];
 	int fix_quality;
+	double timestamp,start_time=0.0,previous_time=0.0,previous[3]={0};
+	int have_previous=0;
 
 	if (NULL==(fp=fopen(filename,"rt")))
 		return(-1);
@@ -1444,6 +1505,7 @@ int readNmeaGGA(double **xyz, const char *filename)
 	{
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
+		if(!nmea_checksum_valid(str))continue;
 
 		token = strtok(str, ",");
 		if (token == NULL || strlen(token) < 6)
@@ -1451,7 +1513,8 @@ int readNmeaGGA(double **xyz, const char *filename)
 
 		if (strncmp(token+3, "GGA", 3)==0)
 		{
-			if (strtok(NULL, ",") == NULL) // Date and time
+			token=strtok(NULL, ",");
+			if (token == NULL || nmea_time_seconds(token,&timestamp)!=0)
 				continue;
 			
 			token = strtok(NULL, ","); // Latitude
@@ -1521,12 +1584,15 @@ int readNmeaGGA(double **xyz, const char *filename)
 			// Convert geodetic position into ECEF coordinates
 			llh2xyz(llh, pos);
 
-			xyz[numd][0] = pos[0];
-			xyz[numd][1] = pos[1];
-			xyz[numd][2] = pos[2];
-			
-			// Update the number of track points
-			numd++;
+			if(have_previous&&timestamp<previous_time-43200.0)timestamp+=86400.0;
+			if(!have_previous){start_time=previous_time=timestamp;
+				memcpy(previous,pos,sizeof(previous));memcpy(xyz[0],pos,sizeof(pos));
+				numd=1;have_previous=1;}
+			else {
+				if(append_motion_segment(xyz,&numd,start_time+0.1*(double)numd,
+					previous_time,previous,timestamp,pos)!=0){fclose(fp);return -2;}
+				previous_time=timestamp;memcpy(previous,pos,sizeof(previous));
+			}
 
 			if (numd>=USER_MOTION_SIZE)
 				break;
@@ -1785,6 +1851,7 @@ void *gps_task(void *arg)
 	#endif
 
 	int gain[MAX_CHAN];
+	double mix_scale = 1.0;
 	double path_loss;
 	double ant_gain;
 	double ant_pat[37];
@@ -1806,6 +1873,7 @@ void *gps_task(void *arg)
 	int result;
 #else
 	int interactive = FALSE;
+	motion_controller_t controller = {0};
 	int key;
 	int key_direction;
 	int direction = UNDEF;
@@ -2044,6 +2112,14 @@ void *gps_task(void *arg)
 		printf("Enable interactive mode.\n");
 		numd = iduration;
 	}
+	if(s->opt.controller_index>=0) {
+		if(motion_controller_open(&controller,s->opt.controller_index)!=0) {
+			fprintf(stderr,"ERROR: Cannot open requested SDL game controller.\n");
+			goto exit;
+		}
+		printf("Enable live game-controller receiver motion.\n");
+		numd=iduration;
+	}
 #endif
 
 	printf("xyz = %11.1f, %11.1f, %11.1f\n", xyz[0][0], xyz[0][1], xyz[0][2]);
@@ -2232,6 +2308,9 @@ void *gps_task(void *arg)
 		}
 #endif
 #ifdef BLADE_GPS
+		if(iumd>0&&controller.active) {
+			memcpy(xyz[iumd],xyz[iumd-1],3U*sizeof(double));
+		}
 		if (interactive)
 		{
 			key_direction = UNDEF;
@@ -2326,6 +2405,17 @@ void *gps_task(void *arg)
 				xyz[iumd][2] += tmat[0][2]*neu[0] + tmat[1][2]*neu[1] + tmat[2][2]*neu[2];
 			}
 		}
+		if(iumd>0&&controller.active) {
+			double controller_neu[3];
+			if(motion_controller_poll(&controller,MAX_VEL,MAX_VEL,controller_neu)!=0) {
+				fprintf(stderr,"ERROR: Game controller disconnected.\n");
+				goto cleanup;
+			}
+			xyz2llh(xyz[iumd-1],llh);ltcmat(llh,tmat);
+			xyz[iumd][0]+=0.1*(tmat[0][0]*controller_neu[0]+tmat[1][0]*controller_neu[1]+tmat[2][0]*controller_neu[2]);
+			xyz[iumd][1]+=0.1*(tmat[0][1]*controller_neu[0]+tmat[1][1]*controller_neu[1]+tmat[2][1]*controller_neu[2]);
+			xyz[iumd][2]+=0.1*(tmat[0][2]*controller_neu[0]+tmat[1][2]*controller_neu[1]+tmat[2][2]*controller_neu[2]);
+		}
 #endif
 		for (i=0; i<MAX_CHAN; i++)
 		{
@@ -2358,6 +2448,12 @@ void *gps_task(void *arg)
 				// Signal gain
 				gain[i] = (int)(path_loss*ant_gain*100.0); // scaled by 100
 			}
+		}
+		{
+			double worst_component=0.0;
+			for(i=0;i<MAX_CHAN;i++) if(chan[i].prn>0)
+				worst_component+=2.5*fabs((double)gain[i]);
+			mix_scale=worst_component>1800.0?1800.0/worst_component:1.0;
 		}
 
 		for (isamp=0; isamp<iq_buff_size; isamp++)
@@ -2415,8 +2511,8 @@ void *gps_task(void *arg)
 			}
 
 			// Store I/Q samples into buffer
-			iq_buff[isamp*2] = (short)i_acc;
-			iq_buff[isamp*2+1] = (short)q_acc;
+			iq_buff[isamp*2] = (short)lrint((double)i_acc*mix_scale);
+			iq_buff[isamp*2+1] = (short)lrint((double)q_acc*mix_scale);
 
 		} // End of omp parallel for
 
@@ -2558,6 +2654,9 @@ void *gps_task(void *arg)
 	pthread_mutex_unlock(&(s->gps.lock));
 
 cleanup:
+#ifdef BLADE_GPS
+	motion_controller_close(&controller);
+#endif
 	// Free I/Q buffer
 	free(iq_buff);
 	iq_buff = NULL;
@@ -2586,14 +2685,15 @@ cleanup:
 	return(0);
 #else
 exit:
-	if (!s->gps.ready && !s->finished)
-		s->gps.error = -1;
+	motion_controller_close(&controller);
 	free(iq_buff);
 	if (xyz != NULL) {
 		free(xyz_storage);
 		free(xyz);
 	}
 	pthread_mutex_lock(&(s->gps.lock));
+	if (!s->gps.ready && !s->finished)
+		s->gps.error = -1;
 	s->finished = true;
 	s->gps.ready = 1;
 	pthread_cond_broadcast(&(s->gps.initialization_done));

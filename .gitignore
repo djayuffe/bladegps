@@ -46,6 +46,7 @@ Temporary Items
 *.o
 *.swp
 bladegps
+tests/test_core
 
 # Auto-downloaded broadcast ephemeris cache files.
 # Existing tracked sample RINEX files remain in the repository.

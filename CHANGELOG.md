@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Adds explicit GPS/GST/BDT/GLONASS-UTC conversion with historical leap-second
+  boundary tests, full-week record aging, and constellation-native scheduling.
+- Aligns navigation and overlay symbols to iterative satellite transmit time and
+  applies GPS TGD, Galileo E1 BGD, and BeiDou B1 TGD to modeled pseudorange.
+- Makes ephemeris selection health-first and future-safe and removes an unlocked
+  non-GPS shutdown read.
+- Extends GPS L1 C/A code generation and storage from PRN 1-32 to PRN 1-37.
+- Adds deterministic SC16 Q11 headroom normalization to both waveform mixers.
+- Adds the `mixed-open` production profile: typed GPS LNAV, Galileo E1, BeiDou
+  B1I, and GLONASS L1OF now share one runtime allocator and wideband mixer.
+- Adds an independent coherent BPSK carrier/code acquisition validator and a
+  generated-I/Q loopback regression.
+- Adds timestamp-aware 10 Hz ECEF, LLH, and NMEA motion interpolation, NMEA
+  checksum/time validation, and optional live SDL2 game-controller motion.
+
 - Adds a dedicated bladeRF hardware-adaptation layer with live frequency,
   sample-rate, analog-bandwidth, and gain-range validation.
 - Replaces bladeRF 1-only TXVGA defaults with portable overall gain while

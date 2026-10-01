@@ -10,6 +10,11 @@ All four profiles have integrated waveform backends. GPS can auto-download its
 legacy daily navigation file; the other profiles auto-download or accept `-e`
 with mixed RINEX 3/4.
 
+`-S mixed-open` activates one joint production loop for all four systems. It
+uses a 48 Msps/47.1 MHz default span, constellation-native transmit time, and a
+single elevation-ranked 16-channel bank. Unsupported hardware bandwidth fails
+before transmission.
+
 | Layer | GPS L1 C/A | Galileo E1 OS | BeiDou B1I | GLONASS L1OF |
 | --- | --- | --- | --- | --- |
 | Signal/RF profile | Implemented | Implemented | Implemented | Implemented |
@@ -60,10 +65,11 @@ preserving carrier, code, data, and overlay phases for unchanged signals. This
 keeps mixed-constellation allocation stable when satellites rise, set, become
 unhealthy, or cross the configured elevation mask.
 
-The current CLI still chooses one profile with `-S`; it does not yet feed several
-profile producers into the allocator in one run. “Mixed” here describes the
-shared allocator/rendering capability and mixed-RINEX ingestion, not a user-facing
-simultaneous-constellation CLI mode.
+The CLI can select either one constellation profile or `mixed-open`. In mixed
+mode, typed GPS LNAV records use the same geometry and RF channel contract as
+Galileo, BeiDou, and GLONASS, so elevation pressure, passband rejection, health,
+and live phase continuity are resolved in one allocator rather than by merging
+independent output files.
 
 ## Band planning
 

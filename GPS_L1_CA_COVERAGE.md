@@ -6,7 +6,7 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 
 - L1 carrier center frequency at 1575.42 MHz.
 - C/A code length of 1023 chips.
-- PRN generation for GPS PRN 1-32 using the G1/G2 delay table currently present in `codegen()`.
+- PRN generation for GPS PRN 1-37 using the IS-GPS-200 G1/G2 delay assignments.
 - 50 bps navigation-data timing through 20 C/A-code epochs per data bit.
 - 30-bit navigation words and subframe buffers.
 - Broadcast ephemeris parsing from RINEX navigation files.
@@ -21,7 +21,8 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - Per-PRN closest-valid ephemeris selection with a bounded four-hour fit window.
 - Navigation-subframe refresh on IODE/IODC/TOE handover without artificial Doppler discontinuity.
 - GPS week-normalized receiver time and code-phase timing.
-- Receiver motion from static LLH, ECEF CSV, NMEA GGA, or interactive keyboard motion.
+- Receiver motion from static LLH, timestamped/resampled ECEF or geodetic CSV,
+  checksummed/timestamped NMEA GGA, keyboard motion, or an SDL2 game controller.
 - Dynamic channel allocation for healthy visible satellites above the configured elevation mask.
 - SC16 I/Q synthesis at 2.6 Msps.
 - Real-time streaming through bladeRF synchronous TX.
@@ -51,21 +52,24 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 `make check` covers GPS epoch and century behavior, week normalization,
 LLH/ECEF round trips, C/A-code balance, per-satellite ephemeris selection, and
 the bundled compressed RINEX sample.
-The tests are deterministic and do not transmit RF.
+The tests are deterministic and do not transmit RF. They include historical
+GPS-UTC leap boundaries, BDT and GLONASS time conversion, PRN 37, health-first
+ephemeris selection, transmit-time and group-delay observations, SC16 overload
+normalization, and an independent BPSK acquisition loopback.
 
 ## Known Non-Certified Areas
 
 These areas are not currently claimed as fully certified:
 
-- PRN coverage beyond GPS PRN 1-32.
+- C/A assignments above GPS PRN 37, including SBAS PRN 120-158.
 - GPS modernized civil signals such as L1C, L2C, or L5.
 - SBAS or non-GPS GNSS signal generation.
 - Formal parity/word-level comparison against official IS-GPS-200 test vectors.
 - RF spectral mask, absolute power, group delay, and modulation quality validation on physical hardware.
-- Leap-second and UTC/GPS edge-case validation across historical navigation files.
+- Leap-second announcements embedded in arbitrary historical navigation-file headers (the fixed historical transition table is tested).
 - Formal URA/health bit-level validation against official navigation-message vectors.
 - Robust external-process-free ephemeris download on Windows without `curl` and `gzip`.
-- Automated receiver-acquisition/regression tests using hardware-in-the-loop.
+- Automated receiver-acquisition/regression tests using hardware-in-the-loop (software coherent acquisition is covered).
 
 ## Practical Validation Checklist
 

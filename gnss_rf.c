@@ -65,12 +65,19 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 	double sample_rate, int16_t *iq, size_t samples)
 {
 	size_t channel,sample;
+	double normalization=1.0,peak_bound=0.0;
 	if(channels==NULL || count==0U || iq==NULL || samples==0U ||
 		!isfinite(center) || !isfinite(sample_rate) || sample_rate<=0.0 ||
 		samples>SIZE_MAX/(2U*sizeof(*iq))) return -1;
-	for(channel=0U;channel<count;channel++)
-		if(channels[channel].enabled && gnss_rf_validate_channel(&channels[channel],center,sample_rate)!=0)
-			return -1;
+	for(channel=0U;channel<count;channel++) if(channels[channel].enabled) {
+		if(gnss_rf_validate_channel(&channels[channel],center,sample_rate)!=0)return -1;
+		peak_bound+=channels[channel].amplitude*
+			(channels[channel].modulation==GNSS_RF_GALILEO_E1?
+				(sqrt(2.0)*sqrt(10.0/11.0)):1.0);
+	}
+	/* Preserve at least 1 dB of deterministic headroom in SC16 Q11.  The
+	 * scale is fixed for a channel bank, so it cannot introduce AGC pumping. */
+	if(peak_bound>1800.0) normalization=1800.0/peak_bound;
 	memset(iq,0,samples*2U*sizeof(*iq));
 	for(sample=0U;sample<samples;sample++) {
 		double i=0.0,q=0.0;
@@ -102,7 +109,8 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 				signal=base*data*overlay;
 			}
 			angle=c->carrier_phase;
-			i += c->amplitude*signal*cos(angle); q += c->amplitude*signal*sin(angle);
+			i += normalization*c->amplitude*signal*cos(angle);
+			q += normalization*c->amplitude*signal*sin(angle);
 			advance(&c->carrier_phase,TWO_PI*(c->carrier_hz+c->doppler_hz-center)/sample_rate,TWO_PI);
 			advance(&c->code_phase,c->code_rate_hz/sample_rate,(double)c->code_length);
 			advance(&c->data_phase,c->data_rate_hz/sample_rate,(double)c->data_symbol_count);

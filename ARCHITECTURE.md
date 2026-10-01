@@ -12,6 +12,9 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrat
 | `bladegps.h` | bladeGPS-specific constants, thread/FIFO state, simulator option state, bladeRF TX state, and cross-module declarations. |
 | `blade_hw.c` / `blade_hw.h` | Device capability/range queries, bladeRF-model adaptation, RF passband validation, generic/legacy gain configuration, XB200 TX filtering, and SC16 Q11 level telemetry. |
 | `gnss.c` / `gnss.h` | Constellation and signal registry, RF/code profiles, profile parsing, capability status, and passband validation. |
+| `gnss_time.c` / `gnss_time.h` | Historical leap-second table and lossless GPS/GST/BDT/GLONASS-UTC conversion used by record selection, propagation, and symbol scheduling. |
+| `gnss_receiver.c` / `gnss_receiver.h` | Independent coherent BPSK carrier/code search used for generated-I/Q loopback validation. |
+| `motion_controller.c` / `motion_controller.h` | Optional SDL2 controller discovery, dead-zone processing, disconnect handling, and north/east/up velocity commands. |
 | `gnss_codes.c` / `gnss_codes.h` | ICD-derived BeiDou B1I and GLONASS L1OF ranging codes, GLONASS FDMA carrier mapping, and Galileo E1 memory-code decoding/CBOC primitives. |
 | `galileo_e1_codes.c` | All 50 E1-B and 50 E1-C primary memory codes from the Galileo OS SIS ICD v2.2 electronic Annex C. |
 | `gnss_nav.c` / `gnss_nav.h` | Dynamically sized typed mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA, plus BeiDou Klobuchar metadata. |
@@ -23,7 +26,7 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrat
 | `gnss_glonass_nav.c` / `gnss_glonass_nav.h` | GLONASS RINEX A15 conversion and GNAV immediate strings 1-4, including sign-magnitude fields, UTC(SU)+3 timing, four-year day index, and Hamming-protected 85-bit strings. |
 | `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
 | `gnss_schedule.c` / `gnss_schedule.h` | Time-ordered Galileo 30-second I/NAV, BeiDou D1 frame, BeiDou D2 ten-frame GEO, and GLONASS 15-string symbol-cycle assembly for the RF renderer. |
-| `gnss_task.c` / `gnss_task.h` | Non-GPS production thread: mixed-RINEX selection, motion, health/age filtering, geometry, FDMA assignment, channel reconciliation, I/Q rendering, FIFO flow, and shutdown. |
+| `gnss_task.c` / `gnss_task.h` | Typed-RINEX and mixed-open production thread: native time conversion, GPS LNAV adaptation, joint selection, motion, health/age filtering, geometry, FDMA assignment, reconciliation, I/Q rendering, FIFO flow, and shutdown. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
@@ -69,8 +72,10 @@ code, data-symbol, and overlay-code phase between calls, so changing producer
 block size does not introduce discontinuities. Its allocator filters unhealthy,
 below-mask, malformed, and out-of-band candidates before retaining the highest
 elevation signals. `gnss_task()` supplies validated observations, time-ordered
-navigation cycles, motion, and FIFO production for the three non-GPS profiles;
-`gps_task()` retains the mature GPS L1 C/A path.
+navigation cycles, motion, and FIFO production for individual non-GPS profiles
+and the four-constellation `mixed-open` profile. `gps_task()` retains the mature
+RINEX 2 GPS-only path; typed GPS LNAV records are adapted inside `gnss_task()`
+when mixed operation is selected.
 
 Allocator updates use `gnss_rf_reconcile()`. A surviving signal is identified by
 constellation, PRN, carrier, modulation, and timing configuration; all four live

@@ -8,6 +8,7 @@ typedef struct {
 	double geometric_range_m, pseudorange_m, range_rate_mps;
 	double azimuth_rad, elevation_rad, clock_bias_s, clock_drift_sps;
 	double doppler_hz, code_phase_chips, carrier_phase_rad;
+	double transmit_sow, travel_time_s, signal_group_delay_s;
 } gnss_observation_t;
 
 int gnss_observe(const gnss_nav_record_t *record, double receive_sow,

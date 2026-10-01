@@ -8,7 +8,7 @@ static const gnss_signal_profile_t signal_profiles[GNSS_SIGNAL_COUNT] = {
 	{
 		GNSS_SIGNAL_GPS_L1CA, GNSS_SYSTEM_GPS, "gps-l1ca",
 		"GPS L1 C/A with LNAV", 1575.42e6, 1.023e6, 1023,
-		2.6e6, 2.5e6, 32, 0, 1
+		2.6e6, 2.5e6, 37, 0, 1
 	},
 	{
 		GNSS_SIGNAL_GALILEO_E1, GNSS_SYSTEM_GALILEO, "galileo-e1",
@@ -24,6 +24,12 @@ static const gnss_signal_profile_t signal_profiles[GNSS_SIGNAL_COUNT] = {
 		GNSS_SIGNAL_GLONASS_L1OF, GNSS_SYSTEM_GLONASS, "glonass-l1of",
 		"GLONASS L1 open FDMA service with GNAV", 1602.0e6, 0.511e6, 511,
 		12.0e6, 10.0e6, 24, 1, 1
+	},
+	{
+		GNSS_SIGNAL_MIXED_OPEN, GNSS_SYSTEM_GPS, "mixed-open",
+		"Concurrent GPS L1 C/A, Galileo E1, BeiDou B1I and GLONASS L1OF",
+		1582.3925e6, 1.023e6, 1023,
+		48.0e6, 47.1e6, 63, 1, 1
 	}
 };
 
@@ -91,7 +97,8 @@ void gnss_print_signal_profiles(void)
 	for (signal = 0; signal < GNSS_SIGNAL_COUNT; signal++) {
 		const gnss_signal_profile_t *profile = &signal_profiles[signal];
 		printf("  %-14s %-8s %10.3f MHz  %s\n", profile->name,
-			gnss_system_name(profile->system), profile->carrier_hz/1.0e6,
+			profile->id==GNSS_SIGNAL_MIXED_OPEN?"Mixed":gnss_system_name(profile->system),
+			profile->carrier_hz/1.0e6,
 			profile->waveform_implemented ? "implemented" : "planned");
 	}
 }

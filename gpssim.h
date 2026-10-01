@@ -15,7 +15,7 @@
 #define MAX_CHAR (100)
 
 /*! \brief Maximum number of satellites in RINEX file */
-#define MAX_SAT (32)
+#define MAX_SAT (37)
 
 /*! \brief Maximum number of channels we simulate */
 #define MAX_CHAN (16)
@@ -185,5 +185,7 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname);
 int readLlhMotion(double **xyz, const char *filename);
 int readUserMotion(double **xyz, const char *filename);
 int readNmeaGGA(double **xyz, const char *filename);
+void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF]);
+int generateNavMsg(gpstime_t g, channel_t *chan, int init);
 
 #endif

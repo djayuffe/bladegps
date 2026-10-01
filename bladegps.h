@@ -12,6 +12,8 @@
 #include <pthread.h>
 #include "gpssim.h"
 #include "gnss.h"
+#include "gnss_time.h"
+#include "gnss_receiver.h"
 #include "gnss_codes.h"
 #include "gnss_nav.h"
 #include "gnss_orbit.h"
@@ -24,6 +26,7 @@
 #include "gnss_geometry.h"
 #include "gnss_task.h"
 #include "blade_hw.h"
+#include "motion_controller.h"
 
 #define DEFAULT_TX_FREQUENCY	1575420000U
 #define DEFAULT_TX_SAMPLERATE	2600000U
@@ -77,6 +80,7 @@ typedef struct {
 	gpstime_t g0;
 	double llh[3];
 	int interactive;
+	int controller_index;
 } option_t;
 
 typedef struct {
