@@ -11,7 +11,7 @@
 int is_fifo_write_ready(sim_t *sim)
 {
 	(void)sim;
-	return 0;
+	return 1;
 }
 
 int stop_was_requested(void)
@@ -924,6 +924,37 @@ static void test_compressed_rinex_sample(void)
 }
 #endif
 
+static void test_non_gps_producer_block(void)
+{
+	sim_t sim;
+	size_t index;
+	int nonzero=0;
+	memset(&sim,0,sizeof(sim));
+	sim.opt.signal=GNSS_SIGNAL_GALILEO_E1;
+	strcpy(sim.opt.navfile,"tests/rinex4_mixed.nav");
+	sim.opt.staticLocationMode=1; sim.opt.llh[0]=59.3293/R2D;
+	sim.opt.llh[1]=18.0686/R2D; sim.opt.llh[2]=30.0;
+	sim.opt.g0.week=-1; sim.opt.iduration=1; sim.opt.elevation_mask=-90.0;
+	sim.opt.tx_frequency=1575420000U; sim.opt.tx_sample_rate=5000000U;
+	sim.iq_block_samples=500000U; sim.fifo_length=1000000U;
+	sim.fifo=calloc(sim.fifo_length*2U,sizeof(*sim.fifo));
+	assert(sim.fifo!=NULL);
+	assert(pthread_mutex_init(&sim.gps.lock,NULL)==0);
+	assert(pthread_cond_init(&sim.gps.initialization_done,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_read_ready,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_write_ready,NULL)==0);
+	assert(gnss_task(&sim)==NULL);
+	assert(sim.gps.ready==1 && sim.gps.error==0 && sim.finished);
+	assert(sim.head==(long)sim.iq_block_samples);
+	for(index=0U;index<sim.iq_block_samples*2U;index++)nonzero+=sim.fifo[index]!=0;
+	assert(nonzero>1000);
+	pthread_cond_destroy(&sim.fifo_write_ready);
+	pthread_cond_destroy(&sim.fifo_read_ready);
+	pthread_cond_destroy(&sim.gps.initialization_done);
+	pthread_mutex_destroy(&sim.gps.lock);
+	free(sim.fifo);
+}
+
 int main(void)
 {
 	test_time_conversions();
@@ -948,6 +979,7 @@ int main(void)
 	test_glonass_frame();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
+	test_non_gps_producer_block();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif

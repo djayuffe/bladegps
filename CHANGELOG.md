@@ -24,6 +24,9 @@
 - Added shared live-observation geometry with iterative transmit time, Earth-rotation
   correction, satellite clock/range-rate correction, local azimuth/elevation,
   Doppler, and pseudorange-derived code/carrier phase initialization.
+- Connected Galileo E1, BeiDou B1I D1/D2, and GLONASS L1OF to the production
+  motion/geometry/allocation/render/FIFO thread, including health and ephemeris-age
+  filtering, FDMA slot selection, exact sample-rate timing, and error propagation.
 
 - Corrected the Galileo convolutional encoder register orientation against all
   three official OS SIS ICD 2.2 SSP symbol vectors.

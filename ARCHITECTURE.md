@@ -2,7 +2,7 @@
 
 This document describes how bladeGPS is organized, how data moves through the simulator, and where to change specific behavior. It is intended for maintainers who need to audit, extend, port, or debug the project.
 
-bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented production backend is GPS L1 C/A; the signal registry also defines the RF and code-domain parameters needed to add Galileo E1, BeiDou B1I, and GLONASS L1OF without conflating their distinct time systems, navigation formats, or carrier plans.
+bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with production backends for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF.
 
 ## Source Layout
 
@@ -22,6 +22,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `gnss_glonass_nav.c` / `gnss_glonass_nav.h` | GLONASS RINEX A15 conversion and GNAV immediate strings 1-4, including sign-magnitude fields, UTC(SU)+3 timing, four-year day index, and Hamming-protected 85-bit strings. |
 | `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
 | `gnss_schedule.c` / `gnss_schedule.h` | Time-ordered Galileo 30-second I/NAV, BeiDou D1 frame, BeiDou D2 ten-frame GEO, and GLONASS 15-string symbol-cycle assembly for the RF renderer. |
+| `gnss_task.c` / `gnss_task.h` | Non-GPS production thread: mixed-RINEX selection, motion, health/age filtering, geometry, FDMA assignment, channel reconciliation, I/Q rendering, FIFO flow, and shutdown. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
@@ -45,11 +46,11 @@ bladegps.c main()
    |-- bladeRF open/configure
    |-- allocate TX buffer and FIFO
    |
-   +--> GPS producer thread: gps_task()
+   +--> selected producer: gps_task() or gnss_task()
    |       |
-   |       |-- read motion and RINEX ephemeris
-   |       |-- allocate visible satellites
-   |       |-- synthesize 0.1 s I/Q blocks
+   |       |-- read motion and constellation navigation records
+   |       |-- compute observations and allocate healthy visible satellites
+   |       |-- schedule navigation data and synthesize 0.1 s I/Q blocks
    |       +-- write blocks into FIFO
    |
    +--> TX consumer thread: tx_task()
@@ -60,17 +61,15 @@ bladegps.c main()
 
 The FIFO decouples synthesis from hardware transmission. The producer generates `tx_sample_rate / 10` samples per 100 ms block, while the TX thread consumes `SAMPLES_PER_BUFFER` samples per libbladeRF transfer.
 
-The shared `gnss_rf` layer is deliberately independent of the GPS-only producer.
+The shared `gnss_rf` layer is independent of the constellation producers.
 It can combine enabled channels from different constellations when every occupied
 band fits the configured complex passband. Each channel retains carrier, ranging
 code, data-symbol, and overlay-code phase between calls, so changing producer
 block size does not introduce discontinuities. Its allocator filters unhealthy,
 below-mask, malformed, and out-of-band candidates before retaining the highest
-elevation signals. Production CLI selection remains fail-closed until the
-production producer supplies this layer with validated ranges. The shared
-navigation scheduler already supplies time-ordered constellation symbol cycles;
-connecting its output to live geometry and FIFO production is kept separate so
-page/FEC correctness can be tested without SDR hardware.
+elevation signals. `gnss_task()` supplies validated observations, time-ordered
+navigation cycles, motion, and FIFO production for the three non-GPS profiles;
+`gps_task()` retains the mature GPS L1 C/A path.
 
 Allocator updates use `gnss_rf_reconcile()`. A surviving signal is identified by
 constellation, PRN, carrier, modulation, and timing configuration; all four live

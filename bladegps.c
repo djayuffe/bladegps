@@ -483,7 +483,8 @@ int start_gps_task(sim_t *s)
 {
 	int status;
 
-	status = pthread_create(&(s->gps.thread), NULL, gps_task, s);
+	status = pthread_create(&(s->gps.thread), NULL,
+		s->opt.signal==GNSS_SIGNAL_GPS_L1CA?gps_task:gnss_task, s);
 
 	return(status);
 }
@@ -492,7 +493,7 @@ void usage(void)
 {
 	printf("Usage: bladegps [options]\n"
 		"Options:\n"
-		"  -e <gps_nav>     RINEX navigation file for GPS ephemerides (auto-downloads if omitted)\n"
+		"  -e <nav_file>    RINEX navigation file (GPS auto-downloads if omitted)\n"
 		"  -u <user_motion> User motion file (dynamic mode)\n"
 		"  -p <llh_motion>  Geodetic CSV motion: time,latitude,longitude,height\n"
 		"  -g <nmea_gga>    NMEA GGA stream (dynamic mode)\n"
@@ -722,6 +723,10 @@ int main(int argc, char *argv[])
 			signal_profile != NULL ? signal_profile->name : "selected signal");
 		return 1;
 	}
+	if (s.opt.signal != GNSS_SIGNAL_GPS_L1CA && s.opt.navfile[0] == 0) {
+		fprintf(stderr,"ERROR: Non-GPS profiles require a mixed RINEX 3/4 navigation file through -e.\n");
+		return 1;
+	}
 	if (!gnss_frequency_fits((double)s.opt.tx_frequency, (double)s.opt.tx_sample_rate,
 		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz)) {
 		fprintf(stderr, "ERROR: Selected sample rate/center frequency does not contain the %s signal.\n",
@@ -874,15 +879,15 @@ int main(int argc, char *argv[])
 		printf("TX VGA2 gain: %d dB\n", s.opt.tx_vga2);
 	}
 
-	// Start GPS task.
+	// Start the selected constellation producer task.
 	s.status = start_gps_task(&s);
 	if (s.status != 0) {
-		fprintf(stderr, "Failed to start GPS task.\n");
+		fprintf(stderr, "Failed to start GNSS producer task.\n");
 		goto out;
 	}
 	else {
 		gps_started = 1;
-		printf("Creating GPS task...\n");
+		printf("Creating GNSS producer task...\n");
 	}
 
 	// Wait until GPS task is initialized
@@ -891,7 +896,7 @@ int main(int argc, char *argv[])
 		pthread_cond_wait(&(s.gps.initialization_done), &(s.gps.lock));
 	if (s.finished) {
 		pthread_mutex_unlock(&(s.gps.lock));
-		fprintf(stderr, "GPS signal generator failed to initialize.\n");
+		fprintf(stderr, "GNSS signal generator failed to initialize.\n");
 		goto out;
 	}
 	pthread_mutex_unlock(&(s.gps.lock));

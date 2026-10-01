@@ -1,20 +1,23 @@
 # Multi-GNSS Architecture and Implementation Contract
 
-bladeGPS is being evolved from a GPS-only signal generator into a multi-GNSS simulator. This document separates implemented behavior from registered architecture so that command-line labels, RF output, and documentation cannot overstate capability.
+bladeGPS provides separate production paths for GPS L1 C/A, Galileo E1 OS,
+BeiDou B1I, and GLONASS L1OF. This document records their implementation and
+validation boundaries.
 
 ## Current capability
 
-Only `gps-l1ca` has a production waveform backend. The other profiles are intentionally visible through `bladegps -L`, but selecting one exits before downloading ephemeris or opening the bladeRF.
+All four profiles have production waveform backends. GPS can auto-download its
+legacy daily navigation file; the other profiles require `-e` with mixed RINEX 3/4.
 
 | Layer | GPS L1 C/A | Galileo E1 OS | BeiDou B1I | GLONASS L1OF |
 | --- | --- | --- | --- | --- |
 | Signal/RF profile | Implemented | Implemented | Implemented | Implemented |
 | Passband validation | Implemented | Implemented | Implemented | Profile and per-satellite FDMA carrier checks implemented |
 | Broadcast ephemeris parser | RINEX 2 production path; typed RINEX 3/4 LNAV reader added | Typed RINEX 3/4 INAV/FNAV reader added | Typed RINEX 3/4 D1/D2 reader added | Typed RINEX 3/4 FDMA reader added |
-| Orbit/clock model | Implemented | Broadcast Kepler/clock/relativity model added; channel integration pending | MEO/IGSO and GEO broadcast models added; channel integration pending | RK4 state-vector/J2/Earth-rotation model added; channel integration pending |
+| Orbit/clock model | Implemented | Integrated Kepler/clock/relativity, iterative transmit time, Sagnac, range rate and Doppler | Integrated MEO/IGSO/GEO orbit/clock, iterative transmit time, Sagnac, range rate and Doppler | Integrated RK4 state-vector/J2/Earth-rotation, iterative transmit time, range rate and Doppler |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
 | Navigation message | GPS LNAV | I/NAV ephemeris word types 1-4 and service word type 5, RINEX-to-ICD quantization, nominal E1-B vertical-page assembly, CRC-24Q, ICD-oriented convolutional coding, 30x8 interleaving, sync insertion, SSP selection, and nominal word scheduling implemented; almanac/FEC2 words remain | Complete D1 subframes 1-3, D2 GEO basic-navigation pages 1-10, and shared D1/D2 186-bit almanac pages are implemented with schedule validation, RINEX D1/D2 scaling, explicit ionosphere inputs, BCH/interleaving, preamble/FraID/SOW and rollover handling; D2 integrity, ionosphere-grid and time-offset service pages remain | Complete 15-string GNAV frames are assembled from RINEX-derived immediate strings 1-4, system-time string 5 and five almanac pairs with sign-magnitude fields, time mark and Hamming protection |
-| Modulation/mixer | Production BPSK(1) | Sample-level E1-B/E1-C CBOC mixer implemented with continuous code/data/pilot-secondary/carrier phase; runtime scheduler pending | Sample-level BPSK mixer and 1 kchip/s D1 NH overlay implemented; D1/D2 runtime scheduler pending | Relative-code/meander/time-mark formatter and per-slot continuous-phase FDMA mixer implemented; runtime scheduler pending |
+| Modulation/mixer | Production BPSK(1) | Production E1-B/E1-C CBOC with continuous code/data/pilot-secondary/carrier phase | Production BPSK with D1 NH overlay and D2 500 bit/s scheduling | Production relative-code/meander/time-mark formatting and per-slot continuous-phase FDMA |
 | Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
 
 ## Core separation

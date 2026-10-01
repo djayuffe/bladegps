@@ -1,12 +1,15 @@
 # bladeGPS
 
-Real-time GNSS signal-simulator framework for bladeRF, based on the GPS signal model from [gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim). The production waveform backend currently generates GPS L1 C/A. Galileo E1, BeiDou B1I, and GLONASS L1OF have registered signal/RF profiles and an explicit implementation roadmap, but their waveform, navigation-message, and ephemeris backends are not yet implemented.
+Real-time GNSS signal-simulator framework for bladeRF, based on the GPS signal model from [gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim). Production backends generate GPS L1 C/A, Galileo E1 OS, BeiDou B1I D1/D2, and GLONASS L1OF from broadcast navigation data.
 
 This is research and lab software. Only transmit GPS-like RF signals inside a properly shielded test setup, with appropriate attenuation, and only where you are legally allowed to do so.
 
 ## Features
 
 - GPS L1 C/A baseband generation with up to 16 simulated channels.
+- Galileo E1-B/E1-C CBOC, BeiDou B1I D1/D2 BPSK, and GLONASS L1OF FDMA generation.
+- Mixed RINEX 3/4 navigation ingestion with constellation-specific orbit, clock,
+  navigation-message, code, modulation, visibility, Doppler, and allocation paths.
 - Static receiver mode using latitude, longitude, and height.
 - Dynamic receiver mode from CSV ECEF user motion files.
 - Dynamic receiver mode from geodetic latitude/longitude/height CSV files.
@@ -76,12 +79,12 @@ List the known signal profiles before configuring a run:
 ./bladegps -L
 ```
 
-The status column is authoritative. A profile marked `planned` is rejected before ephemeris download or bladeRF initialization.
+The status column is authoritative. Non-GPS profiles require an explicit mixed RINEX 3/4 file with `-e`.
 
 ```text
 Usage: bladegps [options]
 Options:
-  -e <gps_nav>     RINEX navigation file for GPS ephemerides (auto-downloads if omitted)
+  -e <nav_file>    RINEX navigation file (GPS auto-downloads if omitted)
   -u <user_motion> User motion file (dynamic mode)
   -p <llh_motion>  Geodetic CSV motion: time,latitude,longitude,height
   -g <nmea_gga>    NMEA GGA stream (dynamic mode)
@@ -116,6 +119,17 @@ Automatic ephemeris download example:
 When `-e` is omitted, bladeGPS downloads the daily GPS broadcast ephemeris from NOAA/NGS CORS, then falls back to the BKG IGS archive if NOAA is unavailable. It uses the `-t` scenario date if provided, otherwise the current UTC date. The downloaded file is saved as `brdcDDD0.YYn` in the working directory and reused on later runs.
 
 The downloader writes to temporary `.tmp` files first, verifies that both the compressed and decompressed files were created, then renames them into place. Failed downloads or decompression errors clean up partial output and print a manual `-e <gps_nav>` fallback hint.
+
+Galileo example using a mixed RINEX 3/4 navigation file:
+
+```sh
+./bladegps -S galileo-e1 -e BRDC00IGS_R_20262740000_01D_MN.rnx \
+  -l 59.3293,18.0686,30 -d 60
+```
+
+Use `-S beidou-b1i` or `-S glonass-l1of` for those production backends. The
+selected center frequency, sample rate, and bandwidth default to the profile's
+safe values and can be overridden with `-f`, `-r`, and `-b`.
 
 User motion CSV example:
 

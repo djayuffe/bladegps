@@ -183,5 +183,7 @@ int selectEphemerides(ephem_t selected[MAX_SAT],
 	const ephem_t source[][MAX_SAT], int count, gpstime_t time);
 int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname);
 int readLlhMotion(double **xyz, const char *filename);
+int readUserMotion(double **xyz, const char *filename);
+int readNmeaGGA(double **xyz, const char *filename);
 
 #endif

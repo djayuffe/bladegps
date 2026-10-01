@@ -147,7 +147,7 @@ static int same_signal(const gnss_rf_channel_t *a, const gnss_rf_channel_t *b)
 {
 	return a->enabled && b->enabled && a->system==b->system && a->prn==b->prn &&
 		a->modulation==b->modulation && a->carrier_hz==b->carrier_hz &&
-		a->code_length==b->code_length && a->code_rate_hz==b->code_rate_hz &&
+		a->code_length==b->code_length &&
 		a->data_symbol_count==b->data_symbol_count && a->data_rate_hz==b->data_rate_hz &&
 		a->overlay_symbol_count==b->overlay_symbol_count &&
 		a->overlay_rate_hz==b->overlay_rate_hz;

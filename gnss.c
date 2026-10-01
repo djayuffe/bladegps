@@ -13,17 +13,17 @@ static const gnss_signal_profile_t signal_profiles[GNSS_SIGNAL_COUNT] = {
 	{
 		GNSS_SIGNAL_GALILEO_E1, GNSS_SYSTEM_GALILEO, "galileo-e1",
 		"Galileo E1-B/C Open Service with I/NAV", 1575.42e6, 1.023e6, 4092,
-		4.092e6, 4.0e6, 36, 0, 0
+		4.092e6, 4.0e6, 36, 0, 1
 	},
 	{
 		GNSS_SIGNAL_BEIDOU_B1I, GNSS_SYSTEM_BEIDOU, "beidou-b1i",
 		"BeiDou B1I Open Service with D1/D2 NAV", 1561.098e6, 2.046e6, 2046,
-		5.0e6, 4.5e6, 63, 0, 0
+		5.0e6, 4.5e6, 63, 0, 1
 	},
 	{
 		GNSS_SIGNAL_GLONASS_L1OF, GNSS_SYSTEM_GLONASS, "glonass-l1of",
 		"GLONASS L1 open FDMA service with GNAV", 1602.0e6, 0.511e6, 511,
-		12.0e6, 10.0e6, 24, 1, 0
+		12.0e6, 10.0e6, 24, 1, 1
 	}
 };
 
