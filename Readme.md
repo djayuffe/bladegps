@@ -178,15 +178,15 @@ Latitude is limited to -90..90 degrees and longitude to -180..180 degrees. Recor
 | Profile | Constellation | Nominal carrier | Status | Notes |
 | --- | --- | ---: | --- | --- |
 | `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-32 |
-| `galileo-e1` | Galileo | 1575.42 MHz | Planned | E1-B/C, I/NAV, FEC/interleaving, and CBOC remain to be implemented |
-| `beidou-b1i` | BeiDou | 1561.098 MHz | Planned | B1I ranging code, D1/D2 navigation, and BDT handling remain to be implemented |
-| `glonass-l1of` | GLONASS | 1602 MHz base | Planned | FDMA slot carriers, state-vector propagation, and GNAV remain to be implemented |
+| `galileo-e1` | Galileo | 1575.42 MHz | Planned | Codes, CBOC primitives, RINEX/orbit, I/NAV words/pages and FEC are implemented; RF channel integration and optional almanac/FEC2 remain |
+| `beidou-b1i` | BeiDou | 1561.098 MHz | Planned | Codes, RINEX/orbit and complete D1 subframes 1–3 are implemented; D1 almanac, D2 payload pages and RF channel integration remain |
+| `glonass-l1of` | GLONASS | 1602 MHz base | Planned | Code, FDMA carriers, RINEX/orbit and complete 15-string GNAV frames are implemented; relative/meander modulation and RF channel integration remain |
 
 Selecting a planned profile returns an error. This prevents an unsupported constellation name from silently producing a GPS waveform. See [MULTI_GNSS.md](MULTI_GNSS.md) for the implementation contract and validation gates.
 
 The source tree already contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping. These primitives do not change a profile to `implemented`: a transmit backend also requires complete navigation messages, constellation-specific ephemeris/time handling, channel mixing, and independent receiver validation.
 
-The multi-GNSS foundation also includes a typed RINEX 3/4 reader and tested Galileo/BeiDou Keplerian, BeiDou GEO, and GLONASS state-vector propagation models. They remain isolated from RF output until navigation-message encoding and the multi-constellation channel mixer are complete.
+The multi-GNSS foundation includes a typed RINEX 3/4 reader; tested Galileo/BeiDou Keplerian, BeiDou GEO, and GLONASS state-vector propagation; constellation ranging codes; and the navigation-message layers summarized above. They remain isolated from RF output until each signal's modulation/channel path and the multi-constellation mixer pass the acceptance gates.
 
 ## Implementation notes
 
