@@ -355,6 +355,95 @@ static void test_galileo_inav_words(void)
 	assert(gnss_galileo_inav_word5(&w5, word) == -1);
 }
 
+static void test_beidou_navigation_subframe(void)
+{
+	static const uint8_t preamble[11] = {1,1,1,0,0,0,1,0,0,1,0};
+	uint8_t information[BEIDOU_NAV_INFORMATION_BITS];
+	uint8_t payload[BEIDOU_NAV_PAYLOAD_BITS];
+	uint8_t subframe[BEIDOU_NAV_SUBFRAME_BITS];
+	uint8_t expected[15];
+	uint32_t recovered_sow;
+	size_t index;
+
+	for (index = 0; index < BEIDOU_NAV_INFORMATION_BITS; index++)
+		information[index] = (uint8_t)(((index * 5U + index / 7U) >> 1U) & 1U);
+	assert(gnss_beidou_nav_encode_subframe(information, subframe) == 0);
+	assert(memcmp(subframe, information, 15U) == 0);
+	assert(gnss_beidou_bch15_11(information + 15U, expected) == 0);
+	assert(memcmp(subframe + 15U, expected, 15U) == 0);
+	for (index = 0; index < 11U; index++) {
+		assert(subframe[30U + index * 2U] == information[26U + index]);
+		assert(subframe[31U + index * 2U] == information[37U + index]);
+	}
+
+	for (index = 0; index < BEIDOU_NAV_PAYLOAD_BITS; index++)
+		payload[index] = (uint8_t)((index / 4U) & 1U);
+	assert(gnss_beidou_nav_build_subframe(3U, UINT32_C(345678), payload,
+		subframe) == 0);
+	assert(memcmp(subframe, preamble, sizeof(preamble)) == 0);
+	assert(unpack_bits(subframe, 11U, 4U) == 0U);
+	assert(unpack_bits(subframe, 15U, 3U) == 3U);
+	recovered_sow = unpack_bits(subframe, 18U, 8U) << 12;
+	for (index = 0; index < 11U; index++)
+		recovered_sow |= (uint32_t)subframe[30U + index * 2U] << (11U - index);
+	recovered_sow |= subframe[31U];
+	assert(recovered_sow == UINT32_C(345678));
+	assert(gnss_beidou_nav_build_subframe(0U, 0U, payload, subframe) == -1);
+	assert(gnss_beidou_nav_build_subframe(6U, 0U, payload, subframe) == -1);
+	assert(gnss_beidou_nav_build_subframe(1U, 604800U, payload, subframe) == -1);
+	payload[9] = 2U;
+	assert(gnss_beidou_nav_build_subframe(1U, 0U, payload, subframe) == -1);
+}
+
+static void recover_beidou_information(const uint8_t subframe[300],
+	uint8_t information[224])
+{
+	unsigned int word, bit;
+	memcpy(information, subframe, 15U);
+	memcpy(information + 15U, subframe + 15U, 11U);
+	for (word = 1U; word < 10U; word++)
+		for (bit = 0U; bit < 11U; bit++) {
+			information[26U+(word-1U)*22U+bit] = subframe[word*30U+bit*2U];
+			information[37U+(word-1U)*22U+bit] = subframe[word*30U+bit*2U+1U];
+		}
+}
+
+static void test_beidou_d1_ephemeris(void)
+{
+	beidou_d1_ephemeris_t fields = {
+		.toe = UINT32_C(0x15555), .delta_mean_motion = -32768,
+		.cuc = 131071, .mean_anomaly = INT32_MIN, .cus = -131072,
+		.crc = -1, .crs = 1, .eccentricity = UINT32_C(0x89abcdef),
+		.sqrt_a = UINT32_C(0xfedcba98), .inclination0 = INT32_MAX,
+		.cic = -2, .omega_rate = -8388608, .cis = 2,
+		.inclination_rate = 8191, .omega0 = -123456789,
+		.argument_of_perigee = 123456789
+	};
+	uint8_t sf2[300], sf3[300], info2[224], info3[224];
+	const uint8_t *p2, *p3;
+
+	assert(gnss_beidou_d1_ephemeris_subframes(&fields,604794U,sf2,sf3) == 0);
+	recover_beidou_information(sf2,info2);
+	recover_beidou_information(sf3,info3);
+	assert(unpack_bits(info2,15,3) == 2U && unpack_bits(info3,15,3) == 3U);
+	assert(unpack_bits(info2,18,20) == 0U);
+	assert(unpack_bits(info3,18,20) == 6U);
+	p2 = info2 + 38U; p3 = info3 + 38U;
+	assert(unpack_bits(p2,0,16) == 0x8000U);
+	assert(unpack_bits(p2,16,18) == 0x1ffffU);
+	assert(unpack_bits(p2,34,32) == UINT32_C(0x80000000));
+	assert(unpack_bits(p2,66,32) == UINT32_C(0x89abcdef));
+	assert(unpack_bits(p2,184,2) == 2U);
+	assert(unpack_bits(p3,0,15) == 0x5555U);
+	assert(unpack_bits(p3,15,32) == UINT32_C(0x7fffffff));
+	assert(unpack_bits(p3,65,24) == UINT32_C(0x800000));
+	assert(unpack_bits(p3,121,32) == (uint32_t)-123456789);
+	assert(unpack_bits(p3,153,32) == UINT32_C(123456789));
+	assert(p3[185] == 0U);
+	fields.inclination_rate = 8192;
+	assert(gnss_beidou_d1_ephemeris_subframes(&fields,0U,sf2,sf3) == -1);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -372,6 +461,9 @@ static void test_rinex4_mixed_navigation(void)
 {
 	gnss_nav_record_t records[4];
 	uint8_t galileo_words[4][GALILEO_INAV_WORD_BITS];
+	beidou_d1_ephemeris_t beidou_ephemeris;
+	uint8_t beidou_sf2[BEIDOU_NAV_SUBFRAME_BITS];
+	uint8_t beidou_sf3[BEIDOU_NAV_SUBFRAME_BITS];
 	size_t count = 0;
 	double position[3];
 	double velocity[3];
@@ -398,7 +490,13 @@ static void test_rinex4_mixed_navigation(void)
 	assert(unpack_bits(galileo_words[3],54,14) == 2920U);
 	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
 	assert(strcmp(records[1].message, "D1") == 0);
-	assert(isnan(records[1].orbit[17]) && records[1].orbit[18] == 809.0);
+	assert(records[1].orbit_count == 26U);
+	assert(isnan(records[1].orbit[17]) && records[1].orbit[18] == 809.0 &&
+		isnan(records[1].orbit[19]));
+	assert(gnss_beidou_d1_ephemeris_from_rinex(&records[1],&beidou_ephemeris) == 0);
+	assert(beidou_ephemeris.toe == 11700U);
+	assert(gnss_beidou_d1_ephemeris_subframes(&beidou_ephemeris,93600U,
+		beidou_sf2,beidou_sf3) == 0);
 	assert(records[2].system == GNSS_SYSTEM_GLONASS && records[2].prn == 1);
 	assert(strcmp(records[2].message, "FDMA") == 0);
 	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
@@ -458,6 +556,8 @@ int main(void)
 	test_multi_gnss_fec();
 	test_galileo_inav_pages();
 	test_galileo_inav_words();
+	test_beidou_navigation_subframe();
+	test_beidou_d1_ephemeris();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32

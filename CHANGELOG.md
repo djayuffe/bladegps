@@ -13,6 +13,13 @@
   Orbit-7 lines no longer shift SISA, health, BGD, and transmission-time fields.
 - Added GLONASS GNAV 85/77 Hamming check-bit generation from the ICD 5.1
   verification matrices, including total even parity.
+- Added the common BeiDou D1/D2 300-bit subframe encoder, including the special
+  first word, dual BCH codewords, bit interleaving, preamble, FraID, and split
+  BDT seconds-of-week header.
+- Added complete BeiDou D1 ephemeris subframes 2 and 3 plus strict RINEX-to-ICD
+  field quantization, split-field placement, and BDT week rollover handling.
+- Corrected BeiDou RINEX A23 Orbit-7 parsing to consume its two defined fields
+  instead of manufacturing two trailing semantic values.
 
 ## Unreleased
 

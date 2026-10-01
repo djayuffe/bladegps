@@ -210,6 +210,9 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 					field_count = 3U;
 				else if (line_index == 6U)
 					field_count = 1U;
+			} else if (record.system == GNSS_SYSTEM_BEIDOU && line_index == 6U) {
+				/* RINEX A23 Orbit-7 contains only transmission time and AODC. */
+				field_count = 2U;
 			}
 			if (fgets(line, sizeof(line), stream) == NULL ||
 				parse_orbit_line(line, &record, field_count) != 0)

@@ -17,6 +17,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `gnss_orbit.c` / `gnss_orbit.h` | Constellation-aware Keplerian, BeiDou GEO, clock/relativity, and GLONASS numerical propagation models. |
 | `gnss_fec.c` / `gnss_fec.h` | Galileo CRC-24Q/convolutional/interleaving primitives and BeiDou BCH/interleaving primitives. |
 | `gnss_galileo_nav.c` / `gnss_galileo_nav.h` | Galileo nominal E1-B I/NAV vertical-page construction, CRC coverage, FEC/interleaving, sync/SSP insertion, and 30-second word schedule. |
+| `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, common subframe headers, and D1 ephemeris subframes 2/3 with RINEX-to-ICD scaling. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |

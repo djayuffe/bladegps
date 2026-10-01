@@ -1,0 +1,40 @@
+#ifndef BLADEGPS_GNSS_BEIDOU_NAV_H
+#define BLADEGPS_GNSS_BEIDOU_NAV_H
+
+#include <stdint.h>
+
+#include "gnss_nav.h"
+
+#define BEIDOU_NAV_SUBFRAME_BITS 300U
+#define BEIDOU_NAV_INFORMATION_BITS 224U
+#define BEIDOU_NAV_PAYLOAD_BITS 186U
+
+typedef struct {
+	uint32_t toe;
+	int32_t delta_mean_motion, cuc, mean_anomaly, cus, crc, crs;
+	uint32_t eccentricity, sqrt_a;
+	int32_t inclination0, cic, omega_rate, cis, inclination_rate;
+	int32_t omega0, argument_of_perigee;
+} beidou_d1_ephemeris_t;
+
+/* D1 and D2 use the same 10-word BCH/interleaving structure. Inputs and output
+ * are unpacked bits in MSB/transmission order. */
+int gnss_beidou_nav_encode_subframe(
+	const uint8_t information[BEIDOU_NAV_INFORMATION_BITS],
+	uint8_t subframe[BEIDOU_NAV_SUBFRAME_BITS]);
+
+/* Insert the ICD preamble, reserved header, FraID and BDT seconds-of-week,
+ * then encode the caller-supplied constellation data payload. */
+int gnss_beidou_nav_build_subframe(unsigned int fraid, uint32_t sow,
+	const uint8_t payload[BEIDOU_NAV_PAYLOAD_BITS],
+	uint8_t subframe[BEIDOU_NAV_SUBFRAME_BITS]);
+
+/* Build D1 ephemeris subframes 2 and 3. frame_sow is the start of subframe 1;
+ * the generated headers use frame_sow+6 and frame_sow+12 modulo one BDT week. */
+int gnss_beidou_d1_ephemeris_subframes(const beidou_d1_ephemeris_t *fields,
+	uint32_t frame_sow, uint8_t subframe2[BEIDOU_NAV_SUBFRAME_BITS],
+	uint8_t subframe3[BEIDOU_NAV_SUBFRAME_BITS]);
+int gnss_beidou_d1_ephemeris_from_rinex(const gnss_nav_record_t *record,
+	beidou_d1_ephemeris_t *fields);
+
+#endif
