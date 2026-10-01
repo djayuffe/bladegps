@@ -1,13 +1,78 @@
 #include "gnss_nav.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #define NAV_LINE_SIZE 256
 #define RINEX_FIELD_WIDTH 19U
+
+typedef struct {
+	FILE *file;
+#ifndef _WIN32
+	pid_t decompressor;
+#endif
+} nav_stream_t;
+
+static int has_suffix(const char *value, const char *suffix)
+{
+	size_t value_length,suffix_length;
+	if(value==NULL||suffix==NULL)return 0;
+	value_length=strlen(value);suffix_length=strlen(suffix);
+	return value_length>=suffix_length&&
+		strcmp(value+value_length-suffix_length,suffix)==0;
+}
+
+static int nav_stream_open(const char *path,nav_stream_t *source)
+{
+	if(path==NULL||source==NULL)return -1;
+	memset(source,0,sizeof(*source));
+#ifdef _WIN32
+	if(has_suffix(path,".gz")||has_suffix(path,".Z"))return -1;
+	source->file=fopen(path,"r");
+#else
+	source->decompressor=-1;
+	if(has_suffix(path,".gz")||has_suffix(path,".Z")) {
+		int descriptors[2];pid_t child;
+		if(pipe(descriptors)!=0)return -1;
+		child=fork();
+		if(child<0){close(descriptors[0]);close(descriptors[1]);return -1;}
+		if(child==0){close(descriptors[0]);
+			if(dup2(descriptors[1],STDOUT_FILENO)<0)_exit(127);
+			close(descriptors[1]);execlp("gzip","gzip","-cd","--",path,(char *)NULL);_exit(127);}
+		close(descriptors[1]);source->file=fdopen(descriptors[0],"r");
+		if(source->file==NULL){close(descriptors[0]);waitpid(child,NULL,0);return -1;}
+		source->decompressor=child;
+	} else source->file=fopen(path,"r");
+#endif
+	return source->file==NULL?-1:0;
+}
+
+static int nav_stream_close(nav_stream_t *source)
+{
+	int result,child_status=0;
+	if(source==NULL||source->file==NULL)return -1;
+	result=fclose(source->file);source->file=NULL;
+#ifndef _WIN32
+	if(source->decompressor>0) {
+		while(waitpid(source->decompressor,&child_status,0)<0)
+			if(errno!=EINTR)return -1;
+		if(!WIFEXITED(child_status)||WEXITSTATUS(child_status)!=0)return -1;
+	}
+#else
+	(void)child_status;
+#endif
+	return result==0?0:-1;
+}
 
 static int system_from_character(char value, gnss_system_t *system)
 {
@@ -82,15 +147,36 @@ static int parse_epoch_line(const char *line, gnss_nav_record_t *record)
 	return 0;
 }
 
+static int parse_rinex2_gps_epoch(const char *line, gnss_nav_record_t *record)
+{
+	unsigned int prn;
+	int year, consumed;
+
+	if (line == NULL || record == NULL ||
+		sscanf(line, "%2u %2d %d %d %d %d %lf%n", &prn, &year,
+			&record->toc.month, &record->toc.day, &record->toc.hour,
+			&record->toc.minute, &record->toc.second, &consumed) != 7 ||
+		prn == 0U || consumed > 22)
+		return -1;
+	record->system = GNSS_SYSTEM_GPS;
+	record->prn = prn;
+	record->toc.year = year >= 80 ? 1900 + year : 2000 + year;
+	if (parse_field(line, 22U, &record->clock_bias) != 0 ||
+		parse_field(line, 41U, &record->clock_drift) != 0 ||
+		parse_field(line, 60U, &record->clock_drift_rate) != 0)
+		return -1;
+	return 0;
+}
+
 static int parse_orbit_line(const char *line, gnss_nav_record_t *record,
-	size_t fields)
+	size_t fields, size_t first_field)
 {
 	size_t field;
 
 	if (record->orbit_count + fields > GNSS_NAV_ORBIT_FIELDS)
 		return -1;
 	for (field = 0; field < fields; field++) {
-		if (parse_field(line, 4U + field * RINEX_FIELD_WIDTH,
+		if (parse_field(line, first_field + field * RINEX_FIELD_WIDTH,
 			&record->orbit[record->orbit_count]) != 0)
 			return -1;
 		record->orbit_count++;
@@ -150,14 +236,17 @@ static int infer_rinex3_message(gnss_nav_record_t *record)
 	}
 }
 
-static int skip_rinex4_record(FILE *stream)
+static int skip_rinex4_record(FILE *stream, char next_record[NAV_LINE_SIZE])
 {
 	char line[NAV_LINE_SIZE];
-	long position;
 
-	while ((position = ftell(stream)) >= 0 && fgets(line, sizeof(line), stream) != NULL) {
-		if (line[0] == '>')
-			return fseek(stream, position, SEEK_SET) == 0 ? 0 : -1;
+	if (stream == NULL || next_record == NULL)
+		return -1;
+	while (fgets(line, sizeof(line), stream) != NULL) {
+		if (line[0] == '>') {
+			strcpy(next_record, line);
+			return 0;
+		}
 	}
 	return ferror(stream) ? -1 : 1;
 }
@@ -166,18 +255,21 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	size_t capacity, size_t *record_count)
 {
 	FILE *stream;
+	nav_stream_t source;
 	char line[NAV_LINE_SIZE];
+	char pending_line[NAV_LINE_SIZE];
 	double version = 0.0;
 	int header_done = 0;
+	int have_pending_line = 0;
 	size_t count = 0;
 
 	if (path == NULL || record_count == NULL ||
 		((records == NULL) != (capacity == 0U)))
 		return -1;
 	*record_count = 0U;
-	stream = fopen(path, "r");
-	if (stream == NULL)
+	if (nav_stream_open(path,&source)!=0)
 		return -1;
+	stream=source.file;
 	while (fgets(line, sizeof(line), stream) != NULL) {
 		if (version == 0.0)
 			version = strtod(line, NULL);
@@ -186,15 +278,25 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 			break;
 		}
 	}
-	if (!header_done || version < 3.0 || version >= 5.0)
+	if (!header_done || version < 2.0 || version >= 5.0)
 		goto fail;
 
-	while (fgets(line, sizeof(line), stream) != NULL) {
+	for (;;) {
 		gnss_nav_record_t record;
 		char epoch_line[NAV_LINE_SIZE];
 		size_t continuation_lines;
 		size_t line_index;
-		int rinex4 = line[0] == '>';
+		int rinex2;
+		int rinex4;
+
+		if (have_pending_line) {
+			strcpy(line, pending_line);
+			have_pending_line = 0;
+		} else if (fgets(line, sizeof(line), stream) == NULL) {
+			break;
+		}
+		rinex2 = version < 3.0;
+		rinex4 = line[0] == '>';
 
 		if (line[0] == '\n' || line[0] == '\r')
 			continue;
@@ -207,11 +309,12 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 			if (sscanf(line, "> %3s %3s %7s", type, satellite, message) != 3)
 				goto fail;
 			if (strcmp(type, "EPH") != 0 || !supported_ephemeris(satellite[0], message)) {
-				int skip_status = skip_rinex4_record(stream);
+				int skip_status = skip_rinex4_record(stream, pending_line);
 				if (skip_status < 0)
 					goto fail;
 				if (skip_status > 0)
 					break;
+				have_pending_line = 1;
 				continue;
 			}
 			if (system_from_character(satellite[0], &record.system) != 0)
@@ -224,8 +327,11 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 		} else {
 			strcpy(epoch_line, line);
 		}
-		if (parse_epoch_line(epoch_line, &record) != 0 || !valid_calendar(&record.toc))
+		if ((rinex2 ? parse_rinex2_gps_epoch(epoch_line, &record) :
+			parse_epoch_line(epoch_line, &record)) != 0 || !valid_calendar(&record.toc))
 			goto fail;
+		if (rinex2)
+			strcpy(record.message, "LNAV");
 		record.model = record.system == GNSS_SYSTEM_GLONASS ?
 			GNSS_NAV_GLONASS_STATE_VECTOR : GNSS_NAV_KEPLERIAN;
 		continuation_lines = record.system == GNSS_SYSTEM_GLONASS ?
@@ -245,10 +351,10 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 				field_count = 2U;
 			}
 			if (fgets(line, sizeof(line), stream) == NULL ||
-				parse_orbit_line(line, &record, field_count) != 0)
+				parse_orbit_line(line, &record, field_count, rinex2 ? 3U : 4U) != 0)
 				goto fail;
 		}
-		if(!rinex4&&infer_rinex3_message(&record)!=0)
+		if(!rinex2&&!rinex4&&infer_rinex3_message(&record)!=0)
 			goto fail;
 		if (count == SIZE_MAX || (records != NULL && count >= capacity))
 			goto fail;
@@ -256,12 +362,12 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 			records[count] = record;
 		count++;
 	}
-	fclose(stream);
+	if(nav_stream_close(&source)!=0)return -1;
 	*record_count = count;
 	return count > 0U ? 0 : -1;
 
 fail:
-	fclose(stream);
+	(void)nav_stream_close(&source);
 	return -1;
 }
 
@@ -312,12 +418,13 @@ static int parse_four_values(const char *text, double values[4])
 int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model)
 {
 	FILE *stream;
+	nav_stream_t source;
 	char line[NAV_LINE_SIZE];
 	double alpha[4],beta[4];
 	int have_alpha=0,have_beta=0,found=0;
 	if(path==NULL||model==NULL)return -1;
-	stream=fopen(path,"r");
-	if(stream==NULL)return -1;
+	if(nav_stream_open(path,&source)!=0)return -1;
+	stream=source.file;
 	while(fgets(line,sizeof(line),stream)!=NULL) {
 		if(strncmp(line,"BDSA",4U)==0) {
 			if(parse_four_values(line+4U,alpha)!=0)goto malformed;
@@ -353,7 +460,8 @@ int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model)
 		}
 	}
 	if(ferror(stream))goto malformed;
-	fclose(stream);return found?0:1;
+	if(nav_stream_close(&source)!=0)return -1;
+	return found?0:1;
 malformed:
-	fclose(stream);return -1;
+	(void)nav_stream_close(&source);return -1;
 }

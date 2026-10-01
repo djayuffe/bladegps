@@ -175,6 +175,8 @@ void llh2xyz(const double *llh, double *xyz);
 void xyz2llh(const double *xyz, double *llh);
 void ltcmat(const double *llh, double t[3][3]);
 void ecef2neu(const double *xyz, double t[3][3], double *neu);
+/*! Generate 1023 GPS L1 C/A chips as 0/1 integers for PRN 1..37.
+ * An invalid PRN leaves the caller's output unchanged. */
 void codegen(int *ca, int prn);
 unsigned long computeChecksum(unsigned long source, int nib);
 double subGpsTime(gpstime_t g1, gpstime_t g0);
@@ -182,6 +184,9 @@ void normalizeGpsTime(gpstime_t *g);
 int selectEphemerides(ephem_t selected[MAX_SAT],
 	const ephem_t source[][MAX_SAT], int count, gpstime_t time);
 int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname);
+/*! Motion readers write at most USER_MOTION_SIZE ECEF positions at 10 Hz.
+ * Return the output count, -1 for open failure, or -2 for invalid accepted
+ * input. Callers allocate every xyz[row] with space for three doubles. */
 int readLlhMotion(double **xyz, const char *filename);
 int readUserMotion(double **xyz, const char *filename);
 int readNmeaGGA(double **xyz, const char *filename);

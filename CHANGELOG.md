@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Unified standalone GPS L1 C/A and mixed-system generation on the same
+  constellation-neutral baseband producer, allocator, continuous-phase mixer,
+  SC16 normalizer, and FIFO path.
+- Added GPS RINEX 2 ingestion to the typed RINEX 3/4 navigation record loader,
+  preserving compatibility with automatically downloaded daily BRDC files.
+- Restored direct `.gz` and legacy `.Z` input on the unified POSIX production
+  path by adding shell-free decompression to the shared typed loader.
+- Replaced seek-based RINEX 4 record skipping with a pending-record buffer, so
+  unsupported STO/ION/EPH families are skipped correctly on gzip pipes and
+  other non-seekable streams; added a FIFO-stream regression test.
+- Doppler-scaled code, navigation-symbol, and secondary/NH overlay clocks from
+  one channel rate factor so every waveform component remains aligned.
+- Added `SUPPORT_MATRIX.md` with explicit per-service layers, payload limits,
+  navigation-file formats, motion modes, bladeRF capabilities, validation
+  coverage, and unsupported-service boundaries; expanded and cross-linked the
+  README, multi-GNSS contract, and architecture guide.
+- Added complete CLI, data-format, and public C API references, including exact
+  defaults, ranges, units, return contracts, structure fields, and internal
+  helper responsibilities.
+- Rejected non-finite static coordinates, heights, scenario seconds, and
+  duration before conversion; this closes NaN paths that bypassed range checks
+  and could reach floating-to-integer conversion.
+
 - Adds explicit GPS/GST/BDT/GLONASS-UTC conversion with historical leap-second
   boundary tests, full-week record aging, and constellation-native scheduling.
 - Aligns navigation and overlay symbols to iterative satellite transmit time and

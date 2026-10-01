@@ -180,14 +180,14 @@ void *gnss_task(void *argument)
 	int numd,step,error=1,direction=UNDEF; double interactive_velocity=0.0; gpstime_t time=sim->opt.g0;
 	int8_t iono_alpha[4]={0},iono_beta[4]={0};
 	motion_controller_t controller={0};
-	const char *failure="unknown non-GPS producer error";
-	if(profile==NULL||sim->opt.signal==GNSS_SIGNAL_GPS_L1CA){failure="invalid generic GNSS signal profile";goto done;}
+	const char *failure="unknown GNSS producer error";
+	if(profile==NULL||!profile->waveform_implemented){failure="signal profile has no implemented baseband waveform";goto done;}
 	stores=calloc(GNSS_SYSTEM_COUNT*(MAX_GNSS_PRN+1U),sizeof(*stores));
 	xyz=malloc(USER_MOTION_SIZE*sizeof(*xyz)); xyz_data=calloc(USER_MOTION_SIZE*3U,sizeof(*xyz_data));
 	iq=calloc(sim->iq_block_samples*2U,sizeof(*iq));
-	if(!stores||!xyz||!xyz_data||!iq){failure="cannot allocate non-GPS producer buffers";goto done;}
+	if(!stores||!xyz||!xyz_data||!iq){failure="cannot allocate GNSS producer buffers";goto done;}
 	for(step=0;step<USER_MOTION_SIZE;step++)xyz[step]=xyz_data+(size_t)step*3U;
-	if(gnss_load_rinex_nav(sim->opt.navfile,&records,&record_count)!=0){failure="cannot parse supported ephemerides from RINEX 3/4 navigation file";goto done;}
+	if(gnss_load_rinex_nav(sim->opt.navfile,&records,&record_count)!=0){failure="cannot parse supported ephemerides from RINEX 2/3/4 navigation file";goto done;}
 	if(sim->opt.signal==GNSS_SIGNAL_BEIDOU_B1I||sim->opt.signal==GNSS_SIGNAL_MIXED_OPEN) {
 		gnss_klobuchar_t model;
 		int iono_status=gnss_read_beidou_ionosphere(sim->opt.navfile,&model);
@@ -282,6 +282,7 @@ void *gnss_task(void *argument)
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
 			signal_store_t *st=&stores[(size_t)records[ri].system*(MAX_GNSS_PRN+1U)+candidates[c].prn];
 			double transmit_sow=observations[c].transmit_sow;
+			double rate_scale=1.0+observations[c].doppler_hz/candidates[c].carrier_hz;
 			gpstime_t system_time;
 			uint32_t schedule_sow=(uint32_t)(floor((transmit_sow+1.0e-7)/30.0)*30.0);
 			if(gnss_gps_to_system_time(records[ri].system,&time,&system_time)!=0){failure="time-scale conversion failed";goto done;}
@@ -298,12 +299,12 @@ void *gnss_task(void *argument)
 				records[ri].system,candidates[c].prn,candidates[c].carrier_hz,observations[c].doppler_hz,
 				signal==GNSS_SIGNAL_GALILEO_E1?90.0:120.0,
 				st->data_code,signal==GNSS_SIGNAL_GALILEO_E1?st->pilot_code:NULL,channel_profile->code_length,
-				channel_profile->code_rate_hz*(1.0+observations[c].doppler_hz/candidates[c].carrier_hz),observations[c].code_phase_chips,
-				st->symbols,st->symbol_count,signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:
-				(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0),
+				channel_profile->code_rate_hz*rate_scale,observations[c].code_phase_chips,
+				st->symbols,st->symbol_count,(signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:
+				(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0))*rate_scale,
 				fmod(transmit_sow*(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0),st->symbol_count),
 				signal==GNSS_SIGNAL_GALILEO_E1||signal==GNSS_SIGNAL_BEIDOU_B1I?st->overlay:NULL,
-				overlay_count,overlay_rate,overlay_count>0U?fmod(transmit_sow*overlay_rate,(double)overlay_count):0.0,
+				overlay_count,overlay_rate*rate_scale,overlay_count>0U?fmod(transmit_sow*overlay_rate,(double)overlay_count):0.0,
 				observations[c].carrier_phase_rad};}
 		if(gnss_rf_reconcile(active,RF_CHANNELS,desired,selected_count)!=0||
 			gnss_rf_render(active,RF_CHANNELS,sim->opt.tx_frequency,sim->opt.tx_sample_rate,iq,sim->iq_block_samples)!=0){failure="RF channel reconciliation or rendering failed";goto done;}

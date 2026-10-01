@@ -3,11 +3,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #include "bladegps.h"
 
-/* gpssim.c's real-time task references this producer-side helper. Unit tests
- * never enter gps_task(), so a local stub keeps the model tests independent
- * from the application entry point in bladegps.c. */
+/* Producer code references these application-side helpers. A local stub keeps
+ * the model tests independent from the executable entry point in bladegps.c. */
 int is_fifo_write_ready(sim_t *sim)
 {
 	(void)sim;
@@ -1072,9 +1080,70 @@ static void test_rinex4_mixed_navigation(void)
 }
 
 #ifndef _WIN32
+static void test_nonseekable_rinex4_navigation(void)
+{
+	char fifo_path[128];
+	gnss_nav_record_t records[4];
+	size_t count=0U;
+	pid_t writer;
+	int status;
+
+	assert(snprintf(fifo_path,sizeof(fifo_path),"/tmp/bladegps-rinex4-%ld.fifo",
+		(long)getpid())>0);
+	(void)unlink(fifo_path);
+	assert(mkfifo(fifo_path,0600)==0);
+	writer=fork();assert(writer>=0);
+	if(writer==0) {
+		int input=open("tests/rinex4_mixed.nav",O_RDONLY);
+		int output;
+		char buffer[4096];
+		ssize_t length;
+		if(input<0)_exit(1);
+		output=open(fifo_path,O_WRONLY);
+		if(output<0){close(input);_exit(2);}
+		while((length=read(input,buffer,sizeof(buffer)))>0) {
+			ssize_t written=0;
+			while(written<length) {
+				ssize_t result=write(output,buffer+written,(size_t)(length-written));
+				if(result<0&&errno==EINTR)continue;
+				if(result<=0){close(input);close(output);_exit(3);}
+				written+=result;
+			}
+		}
+		if(length<0||close(input)!=0||close(output)!=0)_exit(4);
+		_exit(0);
+	}
+	assert(gnss_read_rinex_nav(fifo_path,records,4U,&count)==0);
+	assert(count==3U&&records[0].system==GNSS_SYSTEM_GALILEO&&
+		records[2].system==GNSS_SYSTEM_GLONASS);
+	assert(waitpid(writer,&status,0)==writer);
+	assert(WIFEXITED(status)&&WEXITSTATUS(status)==0);
+	assert(unlink(fifo_path)==0);
+}
+#endif
+
+static void test_rinex2_gps_navigation_adapter(void)
+{
+	gnss_nav_record_t *records=NULL;
+	size_t count=0U,index;
+
+	assert(gnss_load_rinex_nav("brdc1700.16n",&records,&count)==0);
+	assert(records!=NULL&&count>0U);
+	for(index=0U;index<count;index++) {
+		assert(records[index].system==GNSS_SYSTEM_GPS);
+		assert(strcmp(records[index].message,"LNAV")==0);
+		assert(records[index].orbit_count==28U);
+		assert(records[index].toc.year==2016);
+	}
+	free(records);
+}
+
+#ifndef _WIN32
 static void test_compressed_rinex_sample(void)
 {
 	ephem_t ephemerides[EPHEM_ARRAY_SIZE][MAX_SAT];
+	gnss_nav_record_t *typed_records=NULL;
+	size_t typed_count=0U;
 	int count;
 	int valid = 0;
 	int set;
@@ -1086,6 +1155,9 @@ static void test_compressed_rinex_sample(void)
 		for (sv = 0; sv < MAX_SAT; sv++)
 			valid += ephemerides[set][sv].vflg == 1;
 	assert(valid > 0);
+	assert(gnss_load_rinex_nav("brdc2940.18n.Z",&typed_records,&typed_count)==0);
+	assert(typed_records!=NULL&&typed_count>0U);
+	free(typed_records);
 }
 #endif
 
@@ -1169,6 +1241,27 @@ static void test_mixed_runtime_gps_backend(void)
 	pthread_cond_destroy(&sim.gps.initialization_done);pthread_mutex_destroy(&sim.gps.lock);free(sim.fifo);
 }
 
+static void test_single_gps_runtime_uses_shared_baseband(void)
+{
+	sim_t sim;size_t index;int nonzero=0;
+	memset(&sim,0,sizeof(sim));sim.opt.controller_index=-1;
+	sim.opt.signal=GNSS_SIGNAL_GPS_L1CA;strcpy(sim.opt.navfile,"tests/rinex4_gps.nav");
+	sim.opt.staticLocationMode=1;sim.opt.llh[0]=59.3293/R2D;
+	sim.opt.llh[1]=18.0686/R2D;sim.opt.llh[2]=30.0;sim.opt.g0.week=-1;
+	sim.opt.iduration=1;sim.opt.elevation_mask=-90.0;sim.opt.tx_frequency=1575420000U;
+	sim.opt.tx_sample_rate=2600000U;sim.iq_block_samples=260000U;sim.fifo_length=520000U;
+	sim.fifo=calloc(sim.fifo_length*2U,sizeof(*sim.fifo));assert(sim.fifo!=NULL);
+	assert(pthread_mutex_init(&sim.gps.lock,NULL)==0);
+	assert(pthread_cond_init(&sim.gps.initialization_done,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_read_ready,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_write_ready,NULL)==0);
+	assert(gnss_task(&sim)==NULL);assert(sim.gps.ready==1&&sim.gps.error==0&&sim.finished);
+	for(index=0U;index<sim.iq_block_samples*2U;index++)nonzero+=sim.fifo[index]!=0;
+	assert(nonzero>1000);
+	pthread_cond_destroy(&sim.fifo_write_ready);pthread_cond_destroy(&sim.fifo_read_ready);
+	pthread_cond_destroy(&sim.gps.initialization_done);pthread_mutex_destroy(&sim.gps.lock);free(sim.fifo);
+}
+
 int main(void)
 {
 	test_time_conversions();
@@ -1196,9 +1289,14 @@ int main(void)
 	test_llh_motion();
 	test_timed_motion_resampling();
 	test_rinex4_mixed_navigation();
+#ifndef _WIN32
+	test_nonseekable_rinex4_navigation();
+#endif
+	test_rinex2_gps_navigation_adapter();
 	test_non_gps_producer_block();
 	test_non_gps_rejects_stale_navigation();
 	test_mixed_runtime_gps_backend();
+	test_single_gps_runtime_uses_shared_baseband();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif

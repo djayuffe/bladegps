@@ -85,6 +85,8 @@ int gnss_galileo_inav_e1b_page(const uint8_t word[GALILEO_INAV_WORD_BITS],
  * a 30-second I/NAV subframe. Almanac slots are returned as 7..10; the caller
  * selects the satellite-specific almanac word for that slot. */
 int gnss_galileo_inav_e1b_word_type(unsigned int gst_second_mod_30);
+/* Return the E1-B secondary synchronization pattern for an absolute or
+ * modulo-six GST second. Every unsigned input is accepted and wrapped by six. */
 galileo_inav_ssp_t gnss_galileo_inav_ssp_for_second(unsigned int gst_second_mod_6);
 
 #endif

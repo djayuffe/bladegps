@@ -44,7 +44,9 @@ typedef struct {
 int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	size_t capacity, size_t *record_count);
 
-/* Allocate and load every supported ephemeris record in a RINEX 3/4 file.
+/* Allocate and load every supported ephemeris record in a GPS RINEX 2 or
+ * mixed-system RINEX 3/4 file. POSIX builds also accept .gz and legacy .Z
+ * input through a shell-free gzip child process.
  * The caller owns *records and must release it with free(). */
 int gnss_load_rinex_nav(const char *path, gnss_nav_record_t **records,
 	size_t *record_count);

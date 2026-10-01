@@ -1,6 +1,13 @@
 # bladeGPS
 
-Real-time GNSS signal-simulator framework for bladeRF, based on the GPS signal model from [gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim). Production backends generate GPS L1 C/A, Galileo E1 OS, BeiDou B1I D1/D2, and GLONASS L1OF from broadcast navigation data.
+Real-time, broadcast-ephemeris-driven GNSS signal-simulator framework for
+bladeRF, based on the GPS signal model from
+[gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim). Production backends turn
+receiver position and motion into continuous SC16 I/Q for GPS L1 C/A, Galileo
+E1 OS, BeiDou B1I D1/D2, GLONASS L1OF, or a jointly allocated mixture of all
+four. The pipeline includes native time conversion, orbit and clock modeling,
+iterative transmit time, navigation-message construction, spreading codes,
+modulation, Doppler, channel allocation, hardware validation, and real-time TX.
 
 This is research and lab software. Only transmit GPS-like RF signals inside a properly shielded test setup, with appropriate attenuation, and only where you are legally allowed to do so.
 
@@ -18,7 +25,8 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Optional live SDL2 USB/Bluetooth game-controller receiver motion.
 - Timestamp-aware 10 Hz interpolation of ECEF, geodetic, and NMEA motion.
 - RINEX broadcast navigation file parsing.
-- Direct POSIX streaming of plain, `.gz`, and legacy Unix-compressed `.Z` RINEX 2 files.
+- Direct POSIX streaming of plain, `.gz`, and legacy Unix-compressed `.Z`
+  supported RINEX 2, 3, and 4 navigation files.
 - Per-satellite ephemeris selection and seamless 30-second ephemeris refresh.
 - Iterative signal transit-time and Earth-rotation (Sagnac) correction.
 - GPS/GST/BDT/GLONASS-UTC conversion with historical leap-second handling.
@@ -47,7 +55,8 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - libbladeRF headers and library.
 - A bladeRF device supported by libbladeRF.
 - `pkg-config` is recommended so the Makefile can discover libbladeRF automatically.
-- `curl` and `gzip` are required only when using automatic ephemeris download.
+- `curl` is required for automatic ephemeris download. `gzip` is required for
+  downloads and for direct `.gz`/legacy `.Z` navigation input on POSIX.
 - SDL2 is optional; when found through `pkg-config`, `-j` live controller input is enabled.
 
 On macOS with MacPorts, for example, the build can use libbladeRF from `/opt/local` through `pkg-config`. On Linux, install libbladeRF development files through your package manager or build them from Nuand's source tree.
@@ -218,7 +227,10 @@ In interactive mode, `w/s/a/d` move north/south/west/east and `e/q` move up/down
 
 ## Input files
 
-- `brdc*.??n`, `brdc*.??n.gz`, and `brdc*.??n.Z` files are RINEX 2 broadcast navigation files. Compressed input is streamed through `gzip` on POSIX without constructing a shell command.
+- `brdc*.??n`, `brdc*.??n.gz`, and `brdc*.??n.Z` files are GPS RINEX 2
+  broadcast navigation files. Mixed RINEX 3/4 navigation may likewise be plain,
+  `.gz`, or legacy `.Z` on POSIX. Compressed input is streamed through `gzip`
+  without constructing a shell command.
 - `circle.csv`, `satellite.csv`, and `ss520-4.csv` are sample motion/position data files.
 - `run_bladerfGPS.sh` is a convenience script retained from the original project.
 
@@ -256,6 +268,11 @@ than freezing the last velocity.
 
 ## Signal support
 
+“Implemented” below means connected to the production CLI and covered by
+software tests. It does not mean certified ICD conformance or calibrated RF
+interoperability. See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for layer-by-layer
+coverage, payload boundaries, input formats, hardware support, and validation.
+
 | Profile | Constellation | Nominal carrier | Status | Notes |
 | --- | --- | ---: | --- | --- |
 | `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-37 |
@@ -264,7 +281,11 @@ than freezing the last velocity.
 | `glonass-l1of` | GLONASS | 1602 MHz base | Software implemented | L1OF code, FDMA slot carriers, state-vector propagation, immediate GNAV/time strings, safe unavailable-almanac marking, relative/meander modulation and RF synthesis |
 | `mixed-open` | GPS + Galileo + BeiDou + GLONASS | 1582.3925 MHz plan center | Software implemented | One mixed RINEX input, constellation-native timing, shared health/elevation allocator, 16-channel continuous wideband mixer |
 
-Unknown or non-implemented profiles fail closed instead of silently producing a GPS waveform. Non-GPS paths consume either a supplied or automatically downloaded mixed RINEX 3/4 navigation file. See [MULTI_GNSS.md](MULTI_GNSS.md) for the exact payload boundaries and validation status.
+Unknown or non-implemented profiles fail closed instead of silently producing a
+GPS waveform. Galileo, BeiDou, GLONASS, and mixed operation consume either a
+supplied or automatically downloaded mixed RINEX 3/4 navigation file. See
+[MULTI_GNSS.md](MULTI_GNSS.md) for the payload contract and
+[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) for exact layer-level status.
 
 The source tree contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping.
 
@@ -281,11 +302,16 @@ physical hardware and receiver certification remain environment-dependent.
 - The newest healthy in-fit broadcast record already in force is selected independently per constellation/PRN; unhealthy or arbitrary future records cannot mask usable data.
 - Record age is compared in continuous GPS time after native GPS/GST/BDT/UTC conversion.
 - Navigation data and overlay phases use iterative per-satellite transmit time rather than receiver time.
+- Primary-code, navigation-symbol, and secondary/NH overlay clocks share the
+  same per-satellite Doppler scale, preserving component alignment in motion.
+- Standalone GPS L1 C/A and `mixed-open` use the same constellation-neutral
+  scheduler, allocator, continuous-phase renderer, SC16 normalization, and FIFO.
 - Non-GPS 30-second navigation cycles are regenerated at every cycle boundary; Galileo GST TOW and BeiDou BDT SOW therefore advance instead of repeating a cached frame.
 - Mixed RINEX files are counted and allocated dynamically; there is no fixed 4096-record truncation ceiling.
 - BeiDou Klobuchar coefficients are read from RINEX 3 `BDSA`/`BDSB` headers or RINEX 4 `ION C ... D1D2` records and range-checked at their ICD scales.
 - Ephemeris handovers rebuild LNAV data while preserving range-rate continuity.
-- FIFO access between the GPS generation thread and TX thread is protected with the GPS mutex.
+- FIFO access between the GNSS producer and TX thread is protected with the
+  legacy-named `gps.lock` mutex.
 - Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
@@ -298,6 +324,14 @@ physical hardware and receiver certification remain environment-dependent.
 - [ARCHITECTURE.md](ARCHITECTURE.md) - maintainer architecture, runtime flow, modules, and extension points.
 - [GPS_L1_CA_COVERAGE.md](GPS_L1_CA_COVERAGE.md) - implemented L1 C/A coverage, wired gaps, and non-certified areas.
 - [MULTI_GNSS.md](MULTI_GNSS.md) - constellation architecture, current capability matrix, and acceptance gates.
+- [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - detailed per-service, input, timing,
+  hardware, motion, and validation support matrix.
+- [CLI_REFERENCE.md](CLI_REFERENCE.md) - every option, accepted range, default,
+  interaction, RF-plan equation, exit behavior, and example.
+- [DATA_FORMATS.md](DATA_FORMATS.md) - RINEX, compression, motion, NMEA, typed
+  navigation-record, and generated-sample formats.
+- [API_REFERENCE.md](API_REFERENCE.md) - exported C types/functions, units,
+  parameters, return values, validation, and internal helper map.
 - [CHANGELOG.md](CHANGELOG.md) - release history.
 - [LICENSE](LICENSE) - MIT license.
 

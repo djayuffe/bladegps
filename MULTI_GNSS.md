@@ -3,6 +3,8 @@
 bladeGPS provides integrated software paths for GPS L1 C/A, Galileo E1 OS,
 BeiDou B1I, and GLONASS L1OF. This document records their implementation and
 validation boundaries without implying receiver or RF-laboratory certification.
+For the exhaustive layer-by-layer status, input compatibility, motion, hardware,
+and validation matrices, see [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 
 ## Current capability
 
@@ -19,7 +21,7 @@ before transmission.
 | --- | --- | --- | --- | --- |
 | Signal/RF profile | Implemented | Implemented | Implemented | Implemented |
 | Passband validation | Implemented | Implemented | Implemented | Profile and per-satellite FDMA carrier checks implemented |
-| Broadcast ephemeris parser | RINEX 2 production path; typed RINEX 3/4 LNAV reader added | Typed RINEX 3/4 INAV/FNAV reader added | Typed RINEX 3/4 D1/D2 reader added | Typed RINEX 3/4 FDMA reader added |
+| Broadcast ephemeris parser | Shared typed GPS RINEX 2 and RINEX 3/4 LNAV | Typed RINEX 3/4 INAV/FNAV; E1 production consumes INAV only | Typed RINEX 3/4 D1/D2 | Typed RINEX 3/4 FDMA |
 | Orbit/clock model | Implemented | Integrated Kepler/clock/relativity, iterative transmit time, Sagnac, range rate and Doppler | Integrated MEO/IGSO/GEO orbit/clock, iterative transmit time, Sagnac, range rate and Doppler | Integrated RK4 state-vector/J2/Earth-rotation, iterative transmit time, range rate and Doppler |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
 | Navigation message | GPS LNAV | I/NAV ephemeris words 1-4 and word 5 with RINEX health/BGD, correct GST week/TOW, CRC-24Q, convolutional coding, interleaving, sync/SSP, and 30-second rescheduling; unavailable optional service/almanac/FEC2 slots use the ICD dummy word instead of false zero-valued content | D1 subframes 1-3, D2 GEO basic pages 1-10, RINEX 3/4 Klobuchar coefficients, BCH/interleaving, headers and rollover; library almanac builders are available, while service subframes not supplied by ephemeris/ION input are emitted as encoded reserved payloads | Immediate strings 1-4 and calendar-derived string 5, Hamming protection, relative/meander/time-mark symbols; almanac pairs absent from an FDMA ephemeris record are explicitly marked non-operational |
@@ -32,10 +34,18 @@ The simulator is divided into layers that must remain constellation-aware:
 
 1. `gnss.c` owns immutable signal metadata: constellation, carrier plan, code rate, code length, minimum sample rate, occupied bandwidth, satellite limit, FDMA/CDMA behavior, and implementation status.
 2. The CLI selects a profile and obtains safe RF defaults. User overrides are checked to ensure the entire signal fits inside the complex sampled passband.
-3. The navigation layer parses supported RINEX 3/4 mixed-system ephemeris records dynamically, skips unrelated record families without desynchronizing, and reads BeiDou Klobuchar data from RINEX 3 headers or RINEX 4 ION records.
+3. The navigation layer parses GPS RINEX 2 and supported RINEX 3/4 mixed-system
+   ephemeris dynamically, skips unrelated record families without
+   desynchronizing, and reads BeiDou Klobuchar data from RINEX 3 headers or
+   RINEX 4 ION records.
 4. The propagation layer evaluates constellation-specific Keplerian, BeiDou GEO, or GLONASS state-vector models plus clocks, iterative transmit time, Earth rotation, range rate and Doppler.
 5. Constellation navigation backends generate ranging codes and encoded navigation pages/strings. The runtime rebuilds each 30-second cycle at its constellation epoch and substitutes explicitly unavailable service content safely.
 6. `gnss_rf.c` converts those streams to signal levels and combines only healthy, above-mask channels that fit the configured center frequency/sample rate. It preserves carrier, code, data, and overlay phase across arbitrary producer block boundaries.
+
+All received component clocks use the same per-channel Doppler scale. The
+carrier offset, primary-code clock, navigation-symbol clock, and secondary/NH
+overlay clock therefore remain mutually coherent instead of accumulating
+bit/code boundary error during receiver or satellite motion.
 
 `gnss_schedule.c` assembles the transmitter-facing cycles: fifteen two-second
 Galileo pages, five BeiDou D1 subframes, ten complete three-second BeiDou D2 GEO
@@ -65,8 +75,10 @@ preserving carrier, code, data, and overlay phases for unchanged signals. This
 keeps mixed-constellation allocation stable when satellites rise, set, become
 unhealthy, or cross the configured elevation mask.
 
-The CLI can select either one constellation profile or `mixed-open`. In mixed
-mode, typed GPS LNAV records use the same geometry and RF channel contract as
+The CLI can select either one constellation profile or `mixed-open`. Every
+profile, including standalone GPS L1 C/A, uses this same producer, geometry,
+SC16 normalization, buffering, and RF channel contract. In mixed mode, typed
+GPS LNAV records use the same geometry and RF channel contract as
 Galileo, BeiDou, and GLONASS, so elevation pressure, passband rejection, health,
 and live phase continuity are resolved in one allocator rather than by merging
 independent output files.

@@ -17,7 +17,7 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrat
 | `motion_controller.c` / `motion_controller.h` | Optional SDL2 controller discovery, dead-zone processing, disconnect handling, and north/east/up velocity commands. |
 | `gnss_codes.c` / `gnss_codes.h` | ICD-derived BeiDou B1I and GLONASS L1OF ranging codes, GLONASS FDMA carrier mapping, and Galileo E1 memory-code decoding/CBOC primitives. |
 | `galileo_e1_codes.c` | All 50 E1-B and 50 E1-C primary memory codes from the Galileo OS SIS ICD v2.2 electronic Annex C. |
-| `gnss_nav.c` / `gnss_nav.h` | Dynamically sized typed mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA, plus BeiDou Klobuchar metadata. |
+| `gnss_nav.c` / `gnss_nav.h` | Dynamically sized typed GPS RINEX 2 and mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA, plus BeiDou Klobuchar metadata. |
 | `gnss_orbit.c` / `gnss_orbit.h` | Constellation-aware Keplerian, BeiDou GEO, clock/relativity, and GLONASS numerical propagation models. |
 | `gnss_geometry.c` / `gnss_geometry.h` | Iterative transmit-time observations, Earth-rotation correction, azimuth/elevation, satellite clock correction, range rate, Doppler, and pseudorange-derived initial code/carrier phases. |
 | `gnss_fec.c` / `gnss_fec.h` | Galileo CRC-24Q/convolutional/interleaving primitives and BeiDou BCH/interleaving primitives. |
@@ -27,18 +27,24 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrat
 | `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
 | `gnss_schedule.c` / `gnss_schedule.h` | Time-ordered Galileo 30-second I/NAV, BeiDou D1 frame, BeiDou D2 ten-frame GEO, and GLONASS 15-string symbol-cycle assembly for the RF renderer. |
 | `gnss_task.c` / `gnss_task.h` | Typed-RINEX and mixed-open production thread: native time conversion, GPS LNAV adaptation, joint selection, motion, health/age filtering, geometry, FDMA assignment, reconciliation, I/Q rendering, FIFO flow, and shutdown. |
-| `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
+| `gpssim.c` | Inherited GPS/time/coordinate/motion primitives, C/A and LNAV generation, plus retained legacy standalone/file-output and GPS producer paths not selected by the production CLI. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
 | `getopt.c` / `getopt.h` | Windows-compatible `getopt` implementation retained for portability. |
 | `Makefile` | Builds `bladegps`, discovering libbladeRF through `pkg-config` when available. |
 | `Readme.md` | User-facing install, usage, safety, and examples. |
 | `CHANGELOG.md` | Release history. |
+| `SUPPORT_MATRIX.md` | Exact service, input, navigation-payload, time, motion, hardware, validation, and unsupported-feature boundaries. |
+| `CLI_REFERENCE.md` | Exact option syntax, ranges, defaults, interactions, RF-plan equations, and exit behavior. |
+| `DATA_FORMATS.md` | Navigation, compression, receiver-motion, NMEA, and SC16 stream schemas. |
+| `API_REFERENCE.md` | Exported C types/functions and their parameter, unit, validation, ownership, and return contracts. |
 | `brdc*.??n`, `*.csv` | Sample ephemeris and motion/input data. |
 
 ## Runtime Overview
 
-The real-time executable is built with `BLADE_GPS` enabled through `gpssim.h`. In that mode, `gpssim.c` exposes `gps_task()` instead of the standalone file-output simulator main.
+The real-time executable is built with `BLADE_GPS` enabled through `gpssim.h`.
+The historical `gps_task()` implementation remains available for source
+compatibility, while every CLI profile is routed through `gnss_task()`.
 
 ```text
 CLI options
@@ -50,7 +56,7 @@ bladegps.c main()
    |-- bladeRF open/configure
    |-- allocate TX buffer and FIFO
    |
-   +--> selected producer: gps_task() or gnss_task()
+   +--> shared producer: gnss_task()
    |       |
    |       |-- read motion and constellation navigation records
    |       |-- compute observations and allocate healthy visible satellites
@@ -72,10 +78,10 @@ code, data-symbol, and overlay-code phase between calls, so changing producer
 block size does not introduce discontinuities. Its allocator filters unhealthy,
 below-mask, malformed, and out-of-band candidates before retaining the highest
 elevation signals. `gnss_task()` supplies validated observations, time-ordered
-navigation cycles, motion, and FIFO production for individual non-GPS profiles
-and the four-constellation `mixed-open` profile. `gps_task()` retains the mature
-RINEX 2 GPS-only path; typed GPS LNAV records are adapted inside `gnss_task()`
-when mixed operation is selected.
+navigation cycles, motion, and FIFO production for GPS L1 C/A, every individual
+non-GPS profile, and the four-constellation `mixed-open` profile. GPS RINEX 2
+and typed RINEX 3/4 LNAV records are both adapted to the same navigation record
+model before scheduling and synthesis.
 
 Allocator updates use `gnss_rf_reconcile()`. A surviving signal is identified by
 constellation, PRN, carrier, modulation, and timing configuration; all four live
@@ -96,13 +102,14 @@ unchanged carrier or spreading code.
 6. Allocate the bladeRF transfer buffer and internal FIFO.
 7. Open and configure the bladeRF device.
 8. Optionally configure XB200.
-9. Start the selected GPS or non-GPS producer thread.
+9. Start the shared GNSS producer thread.
 10. Wait for producer initialization.
 11. Configure and enable the bladeRF synchronous TX interface.
 12. Start the TX consumer thread.
-13. Join TX, disable TX, join GPS, free resources, and close the device.
+13. Join TX, disable TX, join the GNSS producer, free resources, and close the device.
 
-The program returns non-zero if setup fails, GPS generation cannot initialize, or bladeRF TX streaming reports an error.
+The program returns non-zero if setup fails, GNSS generation cannot initialize,
+or bladeRF TX streaming reports an error.
 
 ## Ephemeris Download Flow
 
@@ -137,20 +144,20 @@ The central runtime state is `sim_t` in `bladegps.h`.
 | --- | --- |
 | `opt` | Parsed simulator options: signal profile, bladeRF device/RF settings, elevation mask, nav file, motion file, duration, start time, motion mode, and interactive mode. |
 | `tx` | bladeRF TX state: device handle, transfer buffer, TX thread, TX error flag. |
-| `gps` | GPS generation thread state and initialization condition variable. |
+| `gps` | GNSS generation thread state and initialization condition variable; the field name is retained for source continuity. |
 | `finished` | Shared shutdown signal. |
 | `fifo` | Interleaved SC16 I/Q sample FIFO. |
 | `head`, `tail` | FIFO write/read sample positions. |
 | `fifo_read_ready` | Signals the TX thread that samples are available. |
-| `fifo_write_ready` | Signals the GPS thread that FIFO space is available. |
+| `fifo_write_ready` | Signals the GNSS producer that FIFO space is available. |
 
 FIFO state is protected with `gps.lock`. The older `tx.lock` remains in the struct but current FIFO coordination uses the GPS mutex consistently.
 
 ## Thread Model
 
-### GPS Producer
+### GNSS Producer
 
-`gps_task()` in `gpssim.c` owns signal synthesis.
+`gnss_task()` owns production signal synthesis for every advertised profile.
 
 Main responsibilities:
 
@@ -178,7 +185,8 @@ Main responsibilities:
 - Zero-pad and submit the final partial buffer as a complete synchronous transfer so the stream cannot retain the scenario tail.
 - On TX error, set `tx.error`, set `finished`, broadcast FIFO condition variables, and exit.
 
-`main()` joins the TX thread first during normal completion, then disables TX and joins the GPS thread.
+`main()` joins the TX thread first during normal completion, then disables TX
+and joins the GNSS producer thread.
 
 ## FIFO Design
 
@@ -195,29 +203,32 @@ Each sample is interleaved I/Q as two `int16_t` values.
 
 `get_sample_length()` computes available complex samples. `fifo_read()` copies from the ring buffer and handles wraparound. The producer writes complete `iq_block_samples` blocks and advances `head`.
 
-## GPS Signal Pipeline
+## Shared GNSS Signal Pipeline
 
-Most signal logic is in `gpssim.c`.
+The CLI production path is coordinated by `gnss_task.c`. It reuses proven GPS
+LNAV primitives from `gpssim.c`, while constellation-neutral record selection,
+geometry, scheduling, allocation, and RF rendering are implemented in the
+`gnss_*` modules.
 
-### Ephemeris
+### Navigation ingestion and selection
 
-`readRinexNavAll()` parses RINEX broadcast navigation records into `ephem_t eph[EPHEM_ARRAY_SIZE][MAX_SAT]`. It:
+`gnss_load_rinex_nav()` performs a validated two-pass load into dynamically
+allocated `gnss_nav_record_t` records. It accepts GPS RINEX 2 and supported
+RINEX 3/4 GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA records.
+Unsupported RINEX 4 record families are skipped at record boundaries. Blank
+orbit fields remain explicit `NAN` values rather than becoming meaningful zero.
 
-- Validates and skips the RINEX 2 header.
-- Groups ephemerides into time sets.
-- Validates line length before fixed-column access.
-- Bounds-checks PRN before indexing `eph`.
-- Rejects non-finite or physically invalid orbital records.
-- Parses SV health and accuracy fields.
-- Converts RINEX `D` exponent designators to `E`.
-- Streams `.gz` and legacy `.Z` input through a shell-free POSIX `gzip` child process.
-- Reads each record's fit interval, defaulting to four hours when omitted.
-- Precomputes orbital working values such as semi-major axis and mean motion.
+At every 100 ms generation step, `gnss_task()`:
 
-`selectEphemerides()` chooses the nearest in-fit record independently for every
-PRN. Selection is refreshed on each 30-second navigation-message boundary.
-When IODE, IODC, or TOE changes, channel subframes are rebuilt and the previous
-range is reevaluated with the new orbit to prevent a false Doppler step.
+1. Filters records by the selected service.
+2. Rejects unhealthy, malformed, arbitrary-future, and out-of-age records.
+3. Selects the newest applicable record independently per system and PRN.
+4. Converts the receiver epoch to the record's native system time.
+5. Builds one candidate observation per usable satellite.
+
+GPS RINEX records are adapted to the inherited `ephem_t`/LNAV builders only
+after typed validation. Galileo E1 consumes INAV records; recognized FNAV data
+is not silently substituted into the E1 I/NAV scheduler.
 
 ### Receiver Motion
 
@@ -228,6 +239,7 @@ Supported modes:
 - CSV geodetic motion from `-p`.
 - NMEA GGA stream from `-g`.
 - Keyboard interactive motion from `-i`: `w/s/a/d` for horizontal movement and `e/q` for up/down.
+- SDL2 USB/Bluetooth controller motion from `-j` when SDL2 is available.
 
 Static LLH is converted through `llh2xyz()`. NMEA GGA is parsed into LLH and then ECEF. CSV motion expects:
 
@@ -240,38 +252,55 @@ hundreds of thousands of small allocations in a 24-hour scenario. Dynamic ECEF
 input is converted back to LLH for status output and interactive local-axis
 motion. The local tangent frame is refreshed while the receiver moves.
 
-### Satellite Geometry
+### Satellite geometry and timing
 
-Important functions:
+`gnss_observe()` dispatches to the constellation-specific orbit backend and
+iterates satellite transmit time. The observation contains Sagnac-corrected
+range, azimuth/elevation, range rate, Doppler, signal group delay, transmit
+seconds-of-week, and initial code/carrier phase. GPS and Galileo use Keplerian
+models; BeiDou adds its GEO transform; GLONASS uses numerical state-vector
+propagation. Clock bias, clock drift, relativity, and the applicable broadcast
+group delay are kept in the modeled measurement path.
 
-- `satpos()` computes satellite position, velocity, clock bias, relativistic correction, TGD, and clock drift with week-aware time differences.
-- `computeRange()` iterates signal transmit time, applies exact Earth-rotation correction, and computes geometric distance, pseudorange, range rate, azimuth, and elevation.
-- `checkSatVisibility()` rejects unhealthy satellites and applies the elevation mask using the same Sagnac-aware range path as pseudorange generation.
-- `allocateChannel()` assigns healthy visible satellites to simulated channels.
+### Codes and navigation schedules
 
-### Navigation Message
+`build_store()` prepares a complete service cycle for the selected record:
 
-Important functions:
+- GPS C/A PRN 1–37 plus a 30-second LNAV cycle built with `eph2sbf()` and
+  `generateNavMsg()`.
+- Galileo E1-B/E1-C primary codes, E1-C secondary code, and scheduled I/NAV.
+- BeiDou B1I code, D1 NH overlay, and the applicable D1 or D2 navigation cycle.
+- GLONASS L1OF code and a fifteen-string GNAV cycle containing relative-code,
+  meander, and time-mark symbols.
 
-- `codegen()` generates the C/A code for PRN 1-32.
-- `eph2sbf()` maps ephemeris to GPS subframe words.
-- `generateNavMsg()` prepares channel navigation message buffers.
+Stores are rebuilt when their broadcast record, system week, or 30-second
+schedule epoch changes. Navigation and overlay phase starts at satellite
+transmit time, not receiver time.
 
-### I/Q Synthesis
+### Allocation and I/Q synthesis
 
-For each 0.1 second step:
+For each 100 ms block:
 
-1. Update active channel range/code/carrier state.
-2. Compute path loss and antenna gain.
-3. For each sample, accumulate each channel's data bit, C/A code chip, and carrier table values.
-4. Store interleaved I/Q samples in `iq_buff`.
-5. Write the block into the FIFO for TX.
+1. `gnss_rf_allocate()` filters out-of-band/below-mask candidates and selects
+   at most sixteen healthy satellites in descending elevation order.
+2. A desired channel bank is created with carrier, code, data, pilot/overlay,
+   Doppler, amplitude, and initial phase state.
+3. `gnss_rf_reconcile()` preserves every live phase for unchanged channels.
+4. `gnss_rf_render()` generates BPSK or Galileo E1 CBOC samples and sums all
+   channels into interleaved SC16 Q11.
+5. The complete block is written to the FIFO for the TX consumer.
 
-The loop emits exactly the requested number of 100 ms blocks. Carrier Doppler
-is derived from consecutive pseudoranges so receiver and satellite motion are
-both represented. Signed I/Q scaling uses symmetric rounding.
+Carrier, code, navigation-data, and secondary/NH clocks are continuous across
+blocks. Code/data/overlay clocks use one Doppler scale per satellite. The mixer
+computes a deterministic whole-bank peak bound and applies one fixed headroom
+scale for the bank, avoiding block-by-block AGC pumping.
 
-Carrier sine/cosine values use 512-entry integer lookup tables.
+### Retained legacy GPS implementation
+
+`gpssim.c` still contains the original standalone GPS producer and file-output
+path for source compatibility. The CLI no longer selects that producer. Shared
+production nevertheless reuses its GPS C/A, LNAV, time, coordinate, and motion
+primitives where those remain authoritative in this codebase.
 
 ## bladeRF Configuration
 
@@ -311,10 +340,14 @@ native-frequency bypass path.
 
 ## Build Architecture
 
-The Makefile builds:
+The Makefile links the CLI/hardware layer, inherited GPS primitives, shared GNSS
+runtime, constellation backends, RF renderer, controller adapter, and platform
+helpers:
 
 ```text
-bladegps.o + gpssim.o + gnss.o + getch.o -> bladegps
+bladegps + blade_hw + gpssim + gnss_task + gnss_{time,nav,orbit,geometry}
+         + gnss_{codes,fec,schedule,rf} + constellation navigation backends
+         + motion_controller + platform helpers -> bladegps executable
 ```
 
 Dependency discovery:
@@ -335,7 +368,8 @@ The source can also be built with explicit `BLADERF_CFLAGS` and `BLADERF_LIBS`.
 - Windows compatibility files are retained (`getopt.c`, `getopt.h`, `conio.h` paths).
 - POSIX interactive keyboard mode uses `getch.c`.
 - Automatic ephemeris download uses external `curl` and `gzip` commands.
-- Compressed RINEX input uses `fork`/`exec` on POSIX; Windows currently requires a decompressed navigation file.
+- Compressed GPS or mixed RINEX input uses `fork`/`exec` on POSIX; Windows
+  currently requires a decompressed navigation file.
 - The command construction assumes generated file names only, not arbitrary user-controlled download paths.
 
 ## Error Handling Strategy
@@ -348,10 +382,11 @@ The current code favors clear failure over partial or silent operation:
 - Malformed NMEA lines are skipped.
 - Malformed RINEX records stop parsing without indexing outside satellite bounds.
 - Unhealthy satellites from RINEX navigation records are not allocated to channels.
-- GPS receiver time is normalized across week boundaries during long simulations.
-- GPS initialization failure wakes waiting threads.
-- GPS generation failures propagate through `gps.error` and return non-zero.
-- TX stream errors stop generation, wake the GPS producer if it is waiting for FIFO space, and return non-zero.
+- GNSS receiver time is normalized across week boundaries during long simulations.
+- GNSS initialization failure wakes waiting threads.
+- GNSS generation failures propagate through `gps.error` and return non-zero;
+  the legacy field name is retained in `sim_t`.
+- TX stream errors stop generation, wake the GNSS producer if it is waiting for FIFO space, and return non-zero.
 - `SIGINT` and `SIGTERM` set an async-signal-safe flag; generation stops at a block boundary, buffered TX drains, and the process returns status 130.
 - Download failures clean temporary files and suggest manual `-e`.
 
@@ -361,15 +396,20 @@ bladeGPS can generate signals in a protected satellite navigation band. The soft
 
 ## Known Limits
 
-- GPS L1 C/A only.
-- PRN support is limited to GPS PRN 1-32.
-- Galileo E1, BeiDou B1I, and GLONASS L1OF are registered profiles but are deliberately rejected until their complete waveform/navigation/ephemeris backends pass the gates in `MULTI_GNSS.md`.
-- No integrity or ionospheric scenario editor.
-- No built-in almanac download.
-- Auto-download currently uses NOAA/NGS and BKG daily legacy GPS broadcast navigation files.
-- Hardware behavior depends on local bladeRF firmware, libbladeRF version, clocking, gain setup, and RF test environment.
-- The realtime path is tested by build/static analysis here; full RF validation requires hardware and shielded lab equipment.
-- See `GPS_L1_CA_COVERAGE.md` for a more detailed implementation and non-certified-area matrix.
+- Advertised waveforms are GPS L1 C/A, Galileo E1 OS, BeiDou B1I, GLONASS
+  L1OF, and their `mixed-open` combination. Modernized GPS, SBAS, and other
+  signal families listed in `SUPPORT_MATRIX.md` are not selectable.
+- GPS C/A assignments stop at PRN 37; SBAS PRN 120–158 are not generated.
+- Optional navigation content that is not present in broadcast ephemeris input
+  is marked dummy, reserved, or unavailable instead of being fabricated.
+- There is no integrity, multipath, spoofing, or ionospheric scenario editor.
+- There is no independent built-in almanac downloader.
+- Automatic acquisition uses NOAA/NGS and BKG GPS or mixed daily broadcast
+  navigation products; it is not a general archival product client.
+- Hardware behavior depends on local bladeRF firmware, FPGA, libbladeRF,
+  clocking, gain setup, filter response, and RF test environment.
+- Software tests do not replace calibrated spectrum, navigation decode, PVT,
+  or shielded receiver interoperability validation.
 
 ## Extension Points
 
@@ -379,7 +419,9 @@ Good places to extend:
 - Add CLI options in `main()` and `usage()` in `bladegps.c`.
 - Add receiver-motion formats beside `readUserMotion()` and `readNmeaGGA()`.
 - Tune TX settings in `bladegps.h`.
-- Add new GNSS constellations by extending ephemeris, code generation, channel state, and nav message generation in `gpssim.c`.
+- Add a new service by extending `gnss.c` profiles, typed navigation ingestion,
+  time/group-delay rules, orbit/clock dispatch, code generation, navigation/FEC
+  scheduling, `gnss_rf` modulation, production routing, and independent tests.
 - Add release artifacts by extending the GitHub release workflow outside the C code.
 
 ## Verification Checklist
@@ -387,10 +429,11 @@ Good places to extend:
 Before release:
 
 ```sh
-make clean all
-clang --analyze -I/opt/local/include bladegps.c gpssim.c getch.c
+make clean
+make check
+clang --analyze -I/opt/local/include bladegps.c gnss_task.c gnss_nav.c gnss_rf.c
 git diff --check
-./bladegps
+./bladegps -L
 ```
 
 For environments where the source tree is read-only or protected, compile objects into a temporary directory:

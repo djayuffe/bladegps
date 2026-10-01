@@ -48,7 +48,8 @@ static int parse_location(const char *arg, double llh[3])
 	if (sscanf(arg, "%lf,%lf,%lf%c", &lat, &lon, &hgt, &extra) != 3)
 		return -1;
 
-	if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0)
+	if (!isfinite(lat) || !isfinite(lon) || !isfinite(hgt) ||
+		lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0)
 		return -1;
 
 	llh[0] = lat / R2D;
@@ -64,7 +65,8 @@ static int parse_duration(const char *arg, int *iduration)
 
 	errno = 0;
 	duration = strtod(arg, &end);
-	if (errno != 0 || end == arg || *end != '\0' || duration <= 0.0 || duration > ((double)USER_MOTION_SIZE) / 10.0)
+	if (errno != 0 || end == arg || *end != '\0' || !isfinite(duration) ||
+		duration <= 0.0 || duration > ((double)USER_MOTION_SIZE) / 10.0)
 		return -1;
 
 	*iduration = (int)(duration * 10.0 + 0.5);
@@ -506,12 +508,15 @@ int start_tx_task(sim_t *s)
 	return(status);
 }
 
-int start_gps_task(sim_t *s)
+int start_gnss_task(sim_t *s)
 {
 	int status;
 
-	status = pthread_create(&(s->gps.thread), NULL,
-		s->opt.signal==GNSS_SIGNAL_GPS_L1CA?gps_task:gnss_task, s);
+	/* Every advertised signal now uses the same constellation-neutral
+	 * producer.  Keeping L1 C/A on the historical gps_task() path made its
+	 * buffering, channel allocation, transmit-time alignment and SC16 scaling
+	 * differ from the otherwise identical L1 C/A component of mixed-open. */
+	status = pthread_create(&(s->gps.thread), NULL, gnss_task, s);
 
 	return(status);
 }
@@ -651,7 +656,8 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 			if (t0.y<=1980 || day_of_year(&t0) < 1 ||
-				t0.hh<0 || t0.hh>23 || t0.mm<0 || t0.mm>59 || t0.sec<0.0 || t0.sec>=60.0)
+				t0.hh<0 || t0.hh>23 || t0.mm<0 || t0.mm>59 ||
+				!isfinite(t0.sec) || t0.sec<0.0 || t0.sec>=60.0)
 			{
 				printf("ERROR: Invalid date and time.\n");
 				exit(1);
@@ -864,7 +870,7 @@ int main(int argc, char *argv[])
 		goto out;
 
 	// Start the selected constellation producer task.
-	s.status = start_gps_task(&s);
+	s.status = start_gnss_task(&s);
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to start GNSS producer task.\n");
 		goto out;
@@ -874,7 +880,7 @@ int main(int argc, char *argv[])
 		printf("Creating GNSS producer task...\n");
 	}
 
-	// Wait until GPS task is initialized
+	// Wait until the GNSS producer is initialized.
 	pthread_mutex_lock(&(s.gps.lock));
 	while (!s.gps.ready)
 		pthread_cond_wait(&(s.gps.initialization_done), &(s.gps.lock));

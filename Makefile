@@ -30,8 +30,9 @@ bladegps: bladegps.o blade_hw.o gpssim.o gnss_task.o motion_controller.o gnss.o 
 tests/test_core: tests/test_core.o blade_hw.o gpssim.o gnss_task.o motion_controller.o gnss.o gnss_time.o gnss_receiver.o gnss_codes.o gnss_fec.o gnss_nav.o gnss_orbit.o gnss_geometry.o gnss_galileo_nav.o gnss_beidou_nav.o gnss_glonass_nav.o gnss_rf.o gnss_schedule.o galileo_e1_codes.o getch.o
 	${CC} $^ ${LDFLAGS} ${LDLIBS} -o $@
 
-check: tests/test_core
+check: bladegps tests/test_core
 	./tests/test_core
+	sh tests/test_cli.sh ./bladegps
 
 clean:
 	rm -f *.o tests/*.o tests/test_core bladegps

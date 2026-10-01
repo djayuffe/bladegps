@@ -27,6 +27,11 @@ This document tracks bladeGPS coverage against the public GPS L1 C/A signal mode
 - SC16 I/Q synthesis at 2.6 Msps.
 - Real-time streaming through bladeRF synchronous TX.
 - Automatic daily GPS broadcast ephemeris download from NOAA/NGS CORS when `-e` is omitted.
+- GPS RINEX 2 and typed RINEX 3/4 LNAV input through the shared navigation
+  record model.
+- The same constellation-neutral producer, health/elevation allocator,
+  transmit-time alignment, continuous-phase renderer, SC16 normalization, and
+  FIFO used by `mixed-open` and the other advertised services.
 
 ## Recently Wired Gaps
 
@@ -63,7 +68,8 @@ These areas are not currently claimed as fully certified:
 
 - C/A assignments above GPS PRN 37, including SBAS PRN 120-158.
 - GPS modernized civil signals such as L1C, L2C, or L5.
-- SBAS or non-GPS GNSS signal generation.
+- SBAS and GNSS services beyond the four profiles documented in
+  `MULTI_GNSS.md` (for example GPS L1C/L2C/L5).
 - Formal parity/word-level comparison against official IS-GPS-200 test vectors.
 - RF spectral mask, absolute power, group delay, and modulation quality validation on physical hardware.
 - Leap-second announcements embedded in arbitrary historical navigation-file headers (the fixed historical transition table is tested).
