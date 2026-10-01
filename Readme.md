@@ -21,7 +21,10 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Iterative signal transit-time and Earth-rotation (Sagnac) correction.
 - Satellite clock bias, relativistic correction, TGD, and clock-drift modeling.
 - Automatic daily GPS broadcast ephemeris download with NOAA/NGS primary and BKG IGS fallback sources when `-e` is omitted.
-- Runtime-selectable bladeRF device, center frequency, sample rate, bandwidth, and TX gains.
+- Capability-driven bladeRF 1.0/2.0 adaptation for center frequency, exact sample rate, analog bandwidth, and portable overall TX gain.
+- Hardware range checks and configuration read-back before RF transmission.
+- Analog-filter validation against the complete occupied signal span, including an offset carrier.
+- SC16 Q11 peak/rail telemetry and deterministic zero-padded final-buffer flushing.
 - Signal registry and RF validation for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF.
 - Real-time SC16 I/Q streaming to bladeRF.
 - Optional XB200 setup for GPS-band transmit filtering/path selection.
@@ -98,8 +101,9 @@ Options:
   -f <Hz>          TX center frequency
   -r <samples/s>   TX sample rate (at least 1 MHz and divisible by 10)
   -b <Hz>          TX analog bandwidth
-  -a <dB>          TX VGA1 gain
-  -A <dB>          TX VGA2 gain
+  -G <dB>          Portable overall TX gain (default: 27 dB)
+  -a <dB>          Legacy bladeRF 1 TXVGA1 gain (requires -A)
+  -A <dB>          Legacy bladeRF 1 TXVGA2 gain (requires -a)
   -M <degrees>     Satellite elevation mask (-90 to 90)
   -i               Interactive mode: North='w', South='s', East='d', West='a', Up='e', Down='q'
 ```
@@ -130,6 +134,32 @@ Galileo example using a mixed RINEX 3/4 navigation file:
 Use `-S beidou-b1i` or `-S glonass-l1of` for those integrated backends. The
 selected center frequency, sample rate, and bandwidth default to the profile's
 safe values and can be overridden with `-f`, `-r`, and `-b`.
+
+### Hardware adaptation and RF filtering
+
+bladeGPS queries frequency, sample-rate, analog-bandwidth, and gain ranges from
+the opened device instead of assuming bladeRF 1.0 limits. It sets and reads
+back every timing-critical value. Exact sample rate and center frequency are
+required because silent coercion would change code, symbol, and carrier timing.
+Analog bandwidth may be quantized by hardware, but the realized value is
+accepted only when it still contains the complete modulated signal and is no
+wider than the complex sample rate.
+
+Use `-G` for model-independent overall TX gain. This is a relative gain setting,
+not calibrated RF power. `-a` and `-A` remain available together for bladeRF
+1.0 systems that explicitly require the legacy `txvga1` and `txvga2` stages;
+they are rejected on devices without those named stages.
+
+With `-x 200`, the XB200 uses the native L-band bypass path and automatic
+low-loss TX filter selection. The RX path is not modified. On bladeRF 2.0,
+libbladeRF chooses the AD9361 interpolation/FIR mode while configuring sample
+rate; forcing another FIR mode here would override that device adaptation.
+
+bladeGPS is transmit-only. No ADC or RX channel participates in generation, so
+configuring an ADC would be unnecessary and could disturb a separate receiver.
+On TX, every submitted SC16 Q11 block is measured; the final report shows peak
+level and rail contact. A final partial scenario block is zero-padded to a full
+synchronous transfer so libbladeRF cannot retain and drop the scenario tail.
 
 User motion CSV example:
 

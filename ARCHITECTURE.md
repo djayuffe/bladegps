@@ -10,6 +10,7 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrat
 | --- | --- |
 | `bladegps.c` | Command-line entry point for real-time bladeRF operation, automatic ephemeris download, FIFO utilities, TX thread, bladeRF setup, cleanup, and process lifecycle. |
 | `bladegps.h` | bladeGPS-specific constants, thread/FIFO state, simulator option state, bladeRF TX state, and cross-module declarations. |
+| `blade_hw.c` / `blade_hw.h` | Device capability/range queries, bladeRF-model adaptation, RF passband validation, generic/legacy gain configuration, XB200 TX filtering, and SC16 Q11 level telemetry. |
 | `gnss.c` / `gnss.h` | Constellation and signal registry, RF/code profiles, profile parsing, capability status, and passband validation. |
 | `gnss_codes.c` / `gnss_codes.h` | ICD-derived BeiDou B1I and GLONASS L1OF ranging codes, GLONASS FDMA carrier mapping, and Galileo E1 memory-code decoding/CBOC primitives. |
 | `galileo_e1_codes.c` | All 50 E1-B and 50 E1-C primary memory codes from the Galileo OS SIS ICD v2.2 electronic Annex C. |
@@ -168,7 +169,8 @@ Main responsibilities:
 - Wait until FIFO data is available or generation is finished.
 - Copy enough samples into `tx.buffer`.
 - Call `bladerf_sync_tx()` with `SAMPLES_PER_BUFFER`.
-- Submit the exact final partial buffer instead of dropping the tail of a scenario.
+- Measure SC16 Q11 peaks and rail contact before each transfer.
+- Zero-pad and submit the final partial buffer as a complete synchronous transfer so the stream cannot retain the scenario tail.
 - On TX error, set `tx.error`, set `finished`, broadcast FIFO condition variables, and exit.
 
 `main()` joins the TX thread first during normal completion, then disables TX and joins the GPS thread.
@@ -268,7 +270,27 @@ Carrier sine/cosine values use 512-entry integer lookup tables.
 
 ## bladeRF Configuration
 
-`main()` configures the TX module from the selected signal profile and optional CLI overrides. The GPS defaults are:
+`main()` builds a hardware request from the selected signal profile and optional
+CLI overrides. `blade_hw_configure_tx()` applies it in this order:
+
+1. Identify the board and require a configured FPGA.
+2. Configure optional XB200 TX-only native L-band bypass and automatic filter selection.
+3. Query the live frequency range, tune, and require exact read-back.
+4. Query the live sample-rate range, configure it, and reject timing-changing coercion.
+5. Query/configure analog bandwidth and validate the realized filter width against `occupied bandwidth + 2 * abs(carrier - center)`.
+6. Apply generic overall gain, or explicitly requested bladeRF 1.0 named stages, after tuning because valid gain ranges can depend on frequency.
+
+libbladeRF range structures are interpreted using `value * scale`. Ranges are
+queried from the open device rather than cached, allowing one binary to adapt
+to bladeRF 1.0 and 2.0 hardware. The analog bandwidth must contain the whole
+modulated signal and must not exceed the complex sample rate.
+
+ADC setup is intentionally absent because bladeGPS never enables RX. The TX
+equivalent concern is DAC input integrity, handled through SC16 Q11 peak and
+rail accounting. Overall TX gain is relative and is not a calibrated output
+power measurement.
+
+The GPS defaults are:
 
 | Setting | Value |
 | --- | --- |
@@ -276,10 +298,11 @@ Carrier sine/cosine values use 512-entry integer lookup tables.
 | Sample rate | `2600000` sps |
 | Bandwidth | `2500000` Hz |
 | Format | `BLADERF_FORMAT_SC16_Q11` |
-| TX VGA1 | `-25` dB |
-| TX VGA2 | `0` dB |
+| Overall TX gain | `27` dB |
 
-XB200 mode (`-x 200`) attaches the expansion board, selects custom TX/RX filter banks, and uses the bypass path.
+Legacy bladeRF 1.0 stage overrides require both `-a` and `-A`. XB200 mode
+(`-x 200`) changes TX only and uses automatic 1 dB filter selection on the
+native-frequency bypass path.
 
 ## Build Architecture
 

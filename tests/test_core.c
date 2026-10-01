@@ -113,6 +113,45 @@ static void test_signal_profiles(void)
 	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
 }
 
+static void test_bladerf_hardware_helpers(void)
+{
+	const struct bladerf_range scaled_range = {1000, 3000, 100, 1000.0f};
+	const int16_t iq[] = {0, 1, 2047, -2048, -1024, 512};
+	blade_sample_stats_t stats = {0};
+	int signal;
+
+	assert(blade_hw_range_contains(&scaled_range, 1.0e6));
+	assert(blade_hw_range_contains(&scaled_range, 3.0e6));
+	assert(!blade_hw_range_contains(&scaled_range, 999999.0));
+	assert(!blade_hw_range_contains(NULL, 1.0e6));
+	assert(fabs(blade_hw_required_bandwidth(1575.42e6, 1575.42e6,
+		2.5e6) - 2.5e6) < 1.0e-6);
+	assert(fabs(blade_hw_required_bandwidth(1574.42e6, 1575.42e6,
+		2.5e6) - 4.5e6) < 1.0e-6);
+	assert(blade_hw_validate_rf_plan(1575.42e6, 1575.42e6,
+		2.5e6, 2.6e6, 2.5e6) == 0);
+	assert(blade_hw_validate_rf_plan(1574.42e6, 1575.42e6,
+		2.5e6, 5.0e6, 4.0e6) == -1);
+	assert(blade_hw_validate_rf_plan(1575.42e6, 1575.42e6,
+		2.5e6, 2.6e6, 3.0e6) == -1);
+	assert(blade_hw_validate_stream_geometry(32U, 32768U, 16U) == 0);
+	assert(blade_hw_validate_stream_geometry(16U, 32768U, 16U) == -1);
+	assert(blade_hw_validate_stream_geometry(32U, 32767U, 16U) == -1);
+	for (signal = 0; signal < GNSS_SIGNAL_COUNT; signal++) {
+		const gnss_signal_profile_t *profile =
+			gnss_signal_profile((gnss_signal_t)signal);
+		assert(profile != NULL);
+		assert(blade_hw_validate_rf_plan(profile->carrier_hz,
+			profile->carrier_hz, profile->recommended_bandwidth_hz,
+			profile->minimum_sample_rate_hz,
+			profile->recommended_bandwidth_hz) == 0);
+	}
+	blade_hw_measure_samples(iq, 3U, &stats);
+	assert(stats.complex_samples == 3U);
+	assert(stats.peak_abs == 2048U);
+	assert(stats.rail_components == 2U);
+}
+
 static void test_rf_renderer_and_allocator(void)
 {
 	static const int8_t code[4] = {1,-1,1,-1};
@@ -1017,6 +1056,7 @@ int main(void)
 	test_ca_code_balance();
 	test_ephemeris_selection();
 	test_signal_profiles();
+	test_bladerf_hardware_helpers();
 	test_rf_renderer_and_allocator();
 	test_constellation_rf_sequences();
 	test_multi_gnss_codes();

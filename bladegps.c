@@ -78,7 +78,7 @@ static int parse_xb_board(const char *arg, int *xb_board)
 
 	errno = 0;
 	value = strtol(arg, &end, 10);
-	if (errno != 0 || end == arg || *end != '\0' || value < 0 || value > 1000)
+	if (errno != 0 || end == arg || *end != '\0' || (value != 0 && value != 200))
 		return -1;
 
 	*xb_board = (int)value;
@@ -337,6 +337,8 @@ void init_sim(sim_t *s)
 {
 	s->tx.dev = NULL;
 	s->tx.buffer = NULL;
+	memset(&s->tx.sample_stats, 0, sizeof(s->tx.sample_stats));
+	s->tx.padded_samples = 0U;
 	pthread_mutex_init(&(s->tx.lock), NULL);
 	s->tx.error = 0;
 
@@ -467,9 +469,17 @@ void *tx_task(void *arg)
 			tx_buffer_current += (2 * samples_populated);
 		}
 
-		// Transmit a full buffer, or the exact final partial buffer at EOF.
+		/* The non-metadata synchronous interface may retain a partial transfer.
+		 * Zero-pad the final block so every generated sample is flushed to the
+		 * device; the padding is silence and is reported at shutdown. */
 		samples_to_send = SAMPLES_PER_BUFFER - buffer_samples_remaining;
-		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, samples_to_send, NULL, TIMEOUT_MS);
+		blade_hw_measure_samples(s->tx.buffer, samples_to_send, &s->tx.sample_stats);
+		if (samples_to_send < SAMPLES_PER_BUFFER) {
+			memset(s->tx.buffer + 2U * samples_to_send, 0,
+				2U * (SAMPLES_PER_BUFFER - samples_to_send) * sizeof(*s->tx.buffer));
+			s->tx.padded_samples += SAMPLES_PER_BUFFER - samples_to_send;
+		}
+		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER, NULL, TIMEOUT_MS);
 		if (status != 0) {
 			fprintf(stderr, "TX stream failed: %s\n", bladerf_strerror(status));
 			s->tx.error = status;
@@ -524,11 +534,12 @@ void usage(void)
 		"  -f <Hz>          TX center frequency\n"
 		"  -r <samples/s>   TX sample rate (must be divisible by 10)\n"
 		"  -b <Hz>          TX analog bandwidth\n"
-		"  -a <dB>          TX VGA1 gain\n"
-		"  -A <dB>          TX VGA2 gain\n"
+		"  -G <dB>          Portable overall TX gain (default: %d dB)\n"
+		"  -a <dB>          Legacy bladeRF 1 TXVGA1 gain (requires -A)\n"
+		"  -A <dB>          Legacy bladeRF 1 TXVGA2 gain (requires -a)\n"
 		"  -M <degrees>     Satellite elevation mask (-90 to 90)\n"
 		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n",
-		((double)USER_MOTION_SIZE)/10.0,
+		((double)USER_MOTION_SIZE)/10.0, DEFAULT_TX_GAIN,
 		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY, UP_KEY, DOWN_KEY);
 
 	return;
@@ -542,8 +553,8 @@ int main(int argc, char *argv[])
 	int exit_code = 1;
 	int gps_started = 0;
 	int tx_enabled = 0;
-	unsigned int actual_sample_rate = 0;
-	unsigned int actual_bandwidth = 0;
+	blade_hw_config_t hw_config;
+	blade_hw_result_t hw_result;
 
 	int result;
 	datetime_t t0;
@@ -553,6 +564,9 @@ int main(int argc, char *argv[])
 	int tx_frequency_set = 0;
 	int tx_sample_rate_set = 0;
 	int tx_bandwidth_set = 0;
+	int tx_gain_set = 0;
+	int tx_vga1_set = 0;
+	int tx_vga2_set = 0;
 	const gnss_signal_profile_t *signal_profile;
 	void (*previous_sigint)(int);
 #ifdef SIGTERM
@@ -575,6 +589,7 @@ int main(int argc, char *argv[])
 	s.opt.tx_bandwidth = DEFAULT_TX_BANDWIDTH;
 	s.opt.tx_vga1 = DEFAULT_TX_VGA1;
 	s.opt.tx_vga2 = DEFAULT_TX_VGA2;
+	s.opt.tx_gain = DEFAULT_TX_GAIN;
 	s.opt.elevation_mask = 0.0;
 	s.opt.g0.week = -1;
 	s.opt.g0.sec = 0.0;
@@ -588,7 +603,7 @@ int main(int argc, char *argv[])
 	s.opt.llh[2] = 100.0;
 	s.opt.interactive = FALSE;
 
-	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:iS:LD:f:r:b:a:A:M:"))!=-1)
+	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:iS:LD:f:r:b:G:a:A:M:"))!=-1)
 	{
 		switch (result)
 		{
@@ -694,17 +709,26 @@ int main(int argc, char *argv[])
 			}
 			tx_sample_rate_set = 1;
 			break;
+		case 'G':
+			if (parse_int_option(optarg, -200, 200, &s.opt.tx_gain) != 0) {
+				fprintf(stderr, "ERROR: Invalid overall TX gain.\n");
+				exit(1);
+			}
+			tx_gain_set = 1;
+			break;
 		case 'a':
 			if (parse_int_option(optarg, -100, 100, &s.opt.tx_vga1) != 0) {
 				fprintf(stderr, "ERROR: Invalid TX VGA1 gain.\n");
 				exit(1);
 			}
+			tx_vga1_set = 1;
 			break;
 		case 'A':
 			if (parse_int_option(optarg, -100, 100, &s.opt.tx_vga2) != 0) {
 				fprintf(stderr, "ERROR: Invalid TX VGA2 gain.\n");
 				exit(1);
 			}
+			tx_vga2_set = 1;
 			break;
 		case 'M':
 			if (parse_elevation_mask(optarg, &s.opt.elevation_mask) != 0) {
@@ -725,6 +749,14 @@ int main(int argc, char *argv[])
 		gnss_print_signal_profiles();
 		return 0;
 	}
+	if (tx_gain_set && (tx_vga1_set || tx_vga2_set)) {
+		fprintf(stderr, "ERROR: -G cannot be combined with legacy -a/-A gain stages.\n");
+		return 1;
+	}
+	if (tx_vga1_set != tx_vga2_set) {
+		fprintf(stderr, "ERROR: Legacy gain mode requires both -a and -A. Prefer portable -G.\n");
+		return 1;
+	}
 
 	signal_profile = gnss_signal_profile(s.opt.signal);
 	if (signal_profile != NULL) {
@@ -744,6 +776,17 @@ int main(int argc, char *argv[])
 		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz)) {
 		fprintf(stderr, "ERROR: Selected sample rate/center frequency does not contain the %s signal.\n",
 			signal_profile->name);
+		return 1;
+	}
+	if (blade_hw_validate_rf_plan((double)s.opt.tx_frequency,
+		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz,
+		(double)s.opt.tx_sample_rate, (double)s.opt.tx_bandwidth) != 0) {
+		fprintf(stderr, "ERROR: TX analog bandwidth must contain the complete signal span and not exceed the sample rate.\n");
+		return 1;
+	}
+	if (blade_hw_validate_stream_geometry(NUM_BUFFERS, SAMPLES_PER_BUFFER,
+		NUM_TRANSFERS) != 0) {
+		fprintf(stderr, "ERROR: Invalid synchronous-stream buffer geometry.\n");
 		return 1;
 	}
 	devstr = s.opt.device[0] != 0 ? s.opt.device : NULL;
@@ -799,99 +842,20 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if(xb_board == 200) {
-		printf("Initializing XB200 expansion board...\n");
-
-		s.status = bladerf_expansion_attach(s.tx.dev, BLADERF_XB_200);
-		if (s.status != 0) {
-			fprintf(stderr, "Failed to enable XB200: %s\n", bladerf_strerror(s.status));
-			goto out;
-		}
-
-		s.status = bladerf_xb200_set_filterbank(s.tx.dev, BLADERF_MODULE_TX, BLADERF_XB200_CUSTOM);
-		if (s.status != 0) {
-			fprintf(stderr, "Failed to set XB200 TX filterbank: %s\n", bladerf_strerror(s.status));
-			goto out;
-		}
-
-		s.status = bladerf_xb200_set_path(s.tx.dev, BLADERF_MODULE_TX, BLADERF_XB200_BYPASS);
-		if (s.status != 0) {
-			fprintf(stderr, "Failed to enable TX bypass path on XB200: %s\n", bladerf_strerror(s.status));
-			goto out;
-		}
-
-		//For sake of completeness set also RX path to a known good state.
-		s.status = bladerf_xb200_set_filterbank(s.tx.dev, BLADERF_MODULE_RX, BLADERF_XB200_CUSTOM);
-		if (s.status != 0) {
-			fprintf(stderr, "Failed to set XB200 RX filterbank: %s\n", bladerf_strerror(s.status));
-			goto out;
-		}
-
-		s.status = bladerf_xb200_set_path(s.tx.dev, BLADERF_MODULE_RX, BLADERF_XB200_BYPASS);
-		if (s.status != 0) {
-			fprintf(stderr, "Failed to enable RX bypass path on XB200: %s\n", bladerf_strerror(s.status));
-			goto out;
-		}
-	}
-
-	if(xb_board == 300) {
-		fprintf(stderr, "XB300 does not support transmitting on GPS frequency\n");
+	memset(&hw_config, 0, sizeof(hw_config));
+	hw_config.frequency_hz = s.opt.tx_frequency;
+	hw_config.sample_rate_hz = s.opt.tx_sample_rate;
+	hw_config.bandwidth_hz = s.opt.tx_bandwidth;
+	hw_config.signal_carrier_hz = signal_profile->carrier_hz;
+	hw_config.occupied_bandwidth_hz = signal_profile->recommended_bandwidth_hz;
+	hw_config.gain_db = s.opt.tx_gain;
+	hw_config.use_legacy_gain = tx_vga1_set && tx_vga2_set;
+	hw_config.txvga1_db = s.opt.tx_vga1;
+	hw_config.txvga2_db = s.opt.tx_vga2;
+	hw_config.xb_board = xb_board;
+	s.status = blade_hw_configure_tx(s.tx.dev, &hw_config, &hw_result);
+	if (s.status != 0)
 		goto out;
-	}
-
-	s.status = bladerf_set_frequency(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_frequency);
-	if (s.status != 0) {
-		fprintf(stderr, "Failed to set TX frequency: %s\n", bladerf_strerror(s.status));
-		goto out;
-	} 
-	else {
-		printf("TX frequency: %u Hz\n", s.opt.tx_frequency);
-	}
-
-	s.status = bladerf_set_sample_rate(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_sample_rate,
-		&actual_sample_rate);
-	if (s.status != 0) {
-		fprintf(stderr, "Failed to set TX sample rate: %s\n", bladerf_strerror(s.status));
-		goto out;
-	}
-	else if (actual_sample_rate != s.opt.tx_sample_rate) {
-		fprintf(stderr,
-			"Failed to realize exact TX sample rate: requested %u sps, hardware selected %u sps.\n",
-			s.opt.tx_sample_rate, actual_sample_rate);
-		goto out;
-	}
-	else {
-		printf("TX sample rate: %u sps\n", actual_sample_rate);
-	}
-
-	s.status = bladerf_set_bandwidth(s.tx.dev, BLADERF_MODULE_TX, s.opt.tx_bandwidth,
-		&actual_bandwidth);
-	if (s.status != 0) {
-		fprintf(stderr, "Failed to set TX bandwidth: %s\n", bladerf_strerror(s.status));
-		goto out;
-	}
-	else {
-		printf("TX bandwidth: %u Hz (requested %u Hz)\n", actual_bandwidth,
-			s.opt.tx_bandwidth);
-	}
-
-	s.status = bladerf_set_txvga1(s.tx.dev, s.opt.tx_vga1);
-	if (s.status != 0) {
-		fprintf(stderr, "Failed to set TX VGA1 gain: %s\n", bladerf_strerror(s.status));
-		goto out;
-	}
-	else {
-		printf("TX VGA1 gain: %d dB\n", s.opt.tx_vga1);
-	}
-
-	s.status = bladerf_set_txvga2(s.tx.dev, s.opt.tx_vga2);
-	if (s.status != 0) {
-		fprintf(stderr, "Failed to set TX VGA2 gain: %s\n", bladerf_strerror(s.status));
-		goto out;
-	}
-	else {
-		printf("TX VGA2 gain: %d dB\n", s.opt.tx_vga2);
-	}
 
 	// Start the selected constellation producer task.
 	s.status = start_gps_task(&s);
@@ -959,6 +923,15 @@ int main(int argc, char *argv[])
 
 	// Wait for the TX task to complete.
 	pthread_join(s.tx.thread, NULL);
+	printf("TX digital peak: %u/2048; rail components: %llu across %llu complex samples\n",
+		s.tx.sample_stats.peak_abs,
+		(unsigned long long)s.tx.sample_stats.rail_components,
+		(unsigned long long)s.tx.sample_stats.complex_samples);
+	if (s.tx.sample_stats.rail_components != 0U)
+		fprintf(stderr, "WARNING: Digital I/Q reached the SC16 Q11 rails; reduce waveform amplitude.\n");
+	if (s.tx.padded_samples != 0U)
+		printf("TX stream flush: %llu trailing zero samples\n",
+			(unsigned long long)s.tx.padded_samples);
 	if (stop_was_requested())
 		printf("\nStopped by user.\n");
 	else if (s.tx.error == 0 && s.gps.error == 0)

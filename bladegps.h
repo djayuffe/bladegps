@@ -23,12 +23,14 @@
 #include "gnss_schedule.h"
 #include "gnss_geometry.h"
 #include "gnss_task.h"
+#include "blade_hw.h"
 
 #define DEFAULT_TX_FREQUENCY	1575420000U
 #define DEFAULT_TX_SAMPLERATE	2600000U
 #define DEFAULT_TX_BANDWIDTH	2500000U
 #define DEFAULT_TX_VGA1			-25
 #define DEFAULT_TX_VGA2			0
+#define DEFAULT_TX_GAIN			27
 
 #define NUM_BUFFERS			32
 #define SAMPLES_PER_BUFFER	(32 * 1024)
@@ -65,6 +67,7 @@ typedef struct {
 	unsigned int tx_bandwidth;
 	int tx_vga1;
 	int tx_vga2;
+	int tx_gain;
 	double elevation_mask;
 	int staticLocationMode;
 	int nmeaGGA;
@@ -83,6 +86,8 @@ typedef struct {
 
 	struct bladerf *dev;
 	int16_t *buffer;
+	blade_sample_stats_t sample_stats;
+	uint64_t padded_samples;
 } tx_t;
 
 typedef struct {

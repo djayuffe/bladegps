@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Adds a dedicated bladeRF hardware-adaptation layer with live frequency,
+  sample-rate, analog-bandwidth, and gain-range validation.
+- Replaces bladeRF 1-only TXVGA defaults with portable overall gain while
+  retaining explicit, validated legacy stage controls.
+- Validates the realized analog filter against the full offset signal span and
+  rejects timing-changing sample-rate coercion.
+- Restricts XB200 changes to TX, using native L-band bypass and automatic
+  filter selection without disturbing RX/ADC state.
+- Reports SC16 Q11 peak and rail contact, and zero-pads the final synchronous
+  transfer so the generated tail is delivered deterministically.
+
 - Regenerates non-GPS navigation-message cycles at every 30-second boundary,
   preventing stale Galileo TOW and BeiDou SOW fields from repeating indefinitely.
 - Selects non-GPS ephemerides by full calendar week and epoch rather than wrapped
