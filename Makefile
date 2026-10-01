@@ -19,10 +19,10 @@ endif
 CPPFLAGS+=-I. $(BLADERF_CFLAGS)
 LDLIBS+=-lm -lpthread $(BLADERF_LIBS)
 
-bladegps: bladegps.o gpssim.o gnss.o gnss_codes.o gnss_fec.o gnss_nav.o gnss_orbit.o gnss_galileo_nav.o gnss_beidou_nav.o gnss_glonass_nav.o gnss_rf.o galileo_e1_codes.o getch.o
+bladegps: bladegps.o gpssim.o gnss.o gnss_codes.o gnss_fec.o gnss_nav.o gnss_orbit.o gnss_galileo_nav.o gnss_beidou_nav.o gnss_glonass_nav.o gnss_rf.o gnss_schedule.o galileo_e1_codes.o getch.o
 	${CC} $^ ${LDFLAGS} ${LDLIBS} -o $@
 
-tests/test_core: tests/test_core.o gpssim.o gnss.o gnss_codes.o gnss_fec.o gnss_nav.o gnss_orbit.o gnss_galileo_nav.o gnss_beidou_nav.o gnss_glonass_nav.o gnss_rf.o galileo_e1_codes.o getch.o
+tests/test_core: tests/test_core.o gpssim.o gnss.o gnss_codes.o gnss_fec.o gnss_nav.o gnss_orbit.o gnss_galileo_nav.o gnss_beidou_nav.o gnss_glonass_nav.o gnss_rf.o gnss_schedule.o galileo_e1_codes.o getch.o
 	${CC} $^ ${LDFLAGS} ${LDLIBS} -o $@
 
 check: tests/test_core

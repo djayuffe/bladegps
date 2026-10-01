@@ -28,6 +28,11 @@ The simulator is divided into layers that must remain constellation-aware:
 5. Constellation navigation backends generate ranging codes and encoded navigation pages/strings. The remaining scheduler work is responsible for choosing the correct page at each constellation epoch.
 6. `gnss_rf.c` converts those streams to signal levels and combines only healthy, above-mask channels that fit the configured center frequency/sample rate. It preserves carrier, code, data, and overlay phase across arbitrary producer block boundaries.
 
+`gnss_schedule.c` assembles the transmitter-facing cycles: fifteen two-second
+Galileo pages, five BeiDou D1 subframes, ten complete three-second BeiDou D2 GEO
+frames, and fifteen GLONASS strings. Reserved service slots are emitted as valid
+FEC-protected reserved payloads rather than unencoded zeros.
+
 ## Shared RF channel contract
 
 `gnss_rf_channel_t` uses `+1/-1` chips and symbols in transmission order. The

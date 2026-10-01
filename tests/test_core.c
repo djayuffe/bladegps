@@ -793,6 +793,10 @@ static void test_rinex4_mixed_navigation(void)
 	const int8_t zero_iono[4]={0,0,0,0};
 	glonass_gnav_immediate_t glonass_immediate;
 	uint8_t glonass_strings[4][GLONASS_GNAV_STRING_BITS];
+	int8_t galileo_cycle[GALILEO_E1_CYCLE_SYMBOLS];
+	int8_t beidou_d1_cycle[BEIDOU_D1_FRAME_SYMBOLS];
+	int8_t beidou_d2_cycle[BEIDOU_D2_CYCLE_SYMBOLS];
+	int8_t glonass_cycle[GLONASS_GNAV_FRAME_SYMBOLS];
 	size_t count = 0;
 	double position[3];
 	double velocity[3];
@@ -817,6 +821,8 @@ static void test_rinex4_mixed_navigation(void)
 	assert(unpack_bits(galileo_words[2],120,8) == 107U);
 	assert(unpack_bits(galileo_words[3],16,6) == 12U);
 	assert(unpack_bits(galileo_words[3],54,14) == 2920U);
+	assert(gnss_schedule_galileo_e1(&records[0],2300U,175200U,galileo_cycle)==0);
+	assert(galileo_cycle[0]==1 || galileo_cycle[0]==-1);
 	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
 	assert(strcmp(records[1].message, "D1") == 0);
 	assert(records[1].orbit_count == 26U);
@@ -832,6 +838,9 @@ static void test_rinex4_mixed_navigation(void)
 	assert(beidou_clock.week==809U && beidou_clock.toc==11700U);
 	assert(beidou_clock.health==0U && beidou_clock.urai==0U);
 	assert(beidou_clock.tgd1==230 && beidou_clock.tgd2==230);
+	assert(gnss_schedule_beidou_d1(&records[1],zero_iono,zero_iono,93600U,
+		beidou_d1_cycle)==0);
+	assert(beidou_d1_cycle[0]==-1 && beidou_d1_cycle[1]==-1);
 	assert(records[2].system == GNSS_SYSTEM_GLONASS && records[2].prn == 1);
 	assert(strcmp(records[2].message, "FDMA") == 0);
 	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
@@ -845,6 +854,8 @@ static void test_rinex4_mixed_navigation(void)
 	assert(glonass_immediate.ft == 2U && glonass_immediate.bn == 0U);
 	assert(gnss_glonass_gnav_immediate_strings(&glonass_immediate,
 		glonass_strings) == 0);
+	assert(gnss_schedule_glonass(&records[2],glonass_cycle)==0);
+	assert(glonass_cycle[0]==1 || glonass_cycle[0]==-1);
 	assert(gnss_propagate_kepler(&records[0], records[0].orbit[8], position,
 		velocity, &clock_bias, &clock_drift) == 0);
 	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);
@@ -858,6 +869,9 @@ static void test_rinex4_mixed_navigation(void)
 	assert(gnss_beidou_d1_ephemeris_from_rinex(&records[1],&beidou_ephemeris)==0);
 	assert(gnss_beidou_d1_clock_from_rinex(&records[1],zero_iono,zero_iono,
 		&beidou_clock)==0);
+	assert(gnss_schedule_beidou_d2(&records[1],zero_iono,zero_iono,93600U,
+		beidou_d2_cycle)==0);
+	assert(beidou_d2_cycle[0]==-1 && beidou_d2_cycle[1]==-1);
 	assert(gnss_propagate_kepler(&records[1], records[1].orbit[8] + 60.0, position,
 		velocity, &clock_bias, &clock_drift) == 0);
 	assert(isfinite(position[0]) && isfinite(position[1]) && isfinite(position[2]));

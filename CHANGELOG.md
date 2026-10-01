@@ -18,6 +18,9 @@
   RINEX D2 conversion through the shared BeiDou quantizers.
 - Added active-channel-bank reconciliation that preserves every live signal phase
   through mixed-constellation allocator updates and rejects duplicate identities.
+- Added deterministic transmitter symbol-cycle scheduling for Galileo E1 I/NAV,
+  BeiDou D1, BeiDou D2 GEO, and GLONASS GNAV, including valid FEC-protected
+  reserved service subframes and regression coverage from mixed RINEX records.
 
 - Corrected the Galileo convolutional encoder register orientation against all
   three official OS SIS ICD 2.2 SSP symbol vectors.

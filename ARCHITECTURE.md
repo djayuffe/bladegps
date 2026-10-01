@@ -20,6 +20,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, D1 clock/ephemeris subframes 1-3, D2 GEO basic-navigation pages 1-10, shared almanac payloads, format-specific schedules, and RINEX-to-ICD scaling. |
 | `gnss_glonass_nav.c` / `gnss_glonass_nav.h` | GLONASS RINEX A15 conversion and GNAV immediate strings 1-4, including sign-magnitude fields, UTC(SU)+3 timing, four-year day index, and Hamming-protected 85-bit strings. |
 | `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
+| `gnss_schedule.c` / `gnss_schedule.h` | Time-ordered Galileo 30-second I/NAV, BeiDou D1 frame, BeiDou D2 ten-frame GEO, and GLONASS 15-string symbol-cycle assembly for the RF renderer. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
@@ -65,8 +66,10 @@ code, data-symbol, and overlay-code phase between calls, so changing producer
 block size does not introduce discontinuities. Its allocator filters unhealthy,
 below-mask, malformed, and out-of-band candidates before retaining the highest
 elevation signals. Production CLI selection remains fail-closed until the
-constellation-specific scheduler supplies this layer with time-aligned navigation
-symbols and validated ranges.
+production producer supplies this layer with validated ranges. The shared
+navigation scheduler already supplies time-ordered constellation symbol cycles;
+connecting its output to live geometry and FIFO production is kept separate so
+page/FEC correctness can be tested without SDR hardware.
 
 Allocator updates use `gnss_rf_reconcile()`. A surviving signal is identified by
 constellation, PRN, carrier, modulation, and timing configuration; all four live
