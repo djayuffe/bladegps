@@ -59,6 +59,8 @@ int gnss_beidou_nav_build_subframe(unsigned int fraid, uint32_t sow,
 int gnss_beidou_d1_ephemeris_subframes(const beidou_d1_ephemeris_t *fields,
 	uint32_t frame_sow, uint8_t subframe2[BEIDOU_NAV_SUBFRAME_BITS],
 	uint8_t subframe3[BEIDOU_NAV_SUBFRAME_BITS]);
+/* D1 and D2 broadcast identical ephemeris/clock parameter scales; these
+ * converters accept either RINEX message type. */
 int gnss_beidou_d1_ephemeris_from_rinex(const gnss_nav_record_t *record,
 	beidou_d1_ephemeris_t *fields);
 int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *fields,

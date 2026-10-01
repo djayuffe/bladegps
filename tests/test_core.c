@@ -197,6 +197,12 @@ static void test_constellation_rf_sequences(void)
 	channel.overlay_symbol_count=GALILEO_E1C_SECONDARY_LENGTH;
 	channel.overlay_rate_hz=250.0;
 	assert(gnss_rf_render(&channel,1U,1575.42e6,5.0e6,iq,128U)==0);
+	{
+		double alpha=sqrt(10.0/11.0),beta=sqrt(1.0/11.0);
+		double expected=500.0*(galileo_b[0]*(alpha+beta)-
+			galileo_c[0]*galileo_secondary[0]*(alpha-beta))/sqrt(2.0);
+		assert(iq[0]==(int16_t)lrint(expected) && iq[1]==0);
+	}
 
 	assert(gnss_beidou_b1i_code(1U,beidou)==0);
 	assert(gnss_beidou_b1i_nh_code(nh)==0);
