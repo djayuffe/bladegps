@@ -7,6 +7,9 @@
 
 #include "gnss_fec.h"
 
+static int quantize_signed(double value, int exponent, int32_t *result);
+static int quantize_unsigned(double value, int exponent, uint32_t *result);
+
 static int valid_bits(const uint8_t *bits, size_t count)
 {
 	size_t index;
@@ -122,6 +125,90 @@ int gnss_beidou_d1_ephemeris_subframes(const beidou_d1_ephemeris_t *f,
 		second,subframe2) == 0 &&
 		gnss_beidou_nav_build_subframe(3U,(frame_sow+12U)%604800U,
 		third,subframe3) == 0 ? 0 : -1;
+}
+
+int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *f,
+	uint32_t sow, uint8_t subframe[300])
+{
+	uint8_t payload[BEIDOU_NAV_PAYLOAD_BITS] = {0};
+	size_t at=0U;
+	unsigned int index;
+	if (f==NULL || subframe==NULL || sow>=604800U || f->health>1U ||
+		f->aodc>31U || f->urai>15U || f->week>8191U || f->toc>75599U ||
+		!fits_signed(f->tgd1,10U) || !fits_signed(f->tgd2,10U) ||
+		!fits_signed(f->af2,11U) || !fits_signed(f->af0,24U) ||
+		!fits_signed(f->af1,22U) || f->aode>31U) return -1;
+	append_uint(payload,&at,f->health,1U); append_uint(payload,&at,f->aodc,5U);
+	append_uint(payload,&at,f->urai,4U); append_uint(payload,&at,f->week,13U);
+	append_uint(payload,&at,f->toc,17U); append_signed(payload,&at,f->tgd1,10U);
+	append_signed(payload,&at,f->tgd2,10U);
+	for(index=0U;index<4U;index++) append_signed(payload,&at,f->alpha[index],8U);
+	for(index=0U;index<4U;index++) append_signed(payload,&at,f->beta[index],8U);
+	append_signed(payload,&at,f->af2,11U); append_signed(payload,&at,f->af0,24U);
+	append_signed(payload,&at,f->af1,22U); append_uint(payload,&at,f->aode,5U);
+	return at==BEIDOU_NAV_PAYLOAD_BITS ?
+		gnss_beidou_nav_build_subframe(1U,sow,payload,subframe) : -1;
+}
+
+static int64_t civil_days(int year, unsigned int month, unsigned int day)
+{
+	int y=year-(month<=2U); int era=(y>=0?y:y-399)/400;
+	unsigned int yoe=(unsigned int)(y-era*400), m=month>2U?month-3U:month+9U;
+	unsigned int doy=(153U*m+2U)/5U+day-1U;
+	return (int64_t)era*146097+(int64_t)(yoe*365U+yoe/4U-yoe/100U+doy)-719468;
+}
+
+static double calendar_sow(const gnss_calendar_time_t *t)
+{
+	int weekday=(int)((civil_days(t->year,(unsigned int)t->month,
+		(unsigned int)t->day)+4)%7);
+	if(weekday<0) weekday+=7;
+	return weekday*86400.0+t->hour*3600.0+t->minute*60.0+t->second;
+}
+
+static int beidou_urai(double accuracy, uint8_t *urai)
+{
+	double best_error=HUGE_VAL;
+	unsigned int value,best=15U;
+	if (!isfinite(accuracy) || accuracy<0.0 || urai==NULL) return -1;
+	if (accuracy>=6144.0) { *urai=15U; return 0; }
+	for(value=0U;value<15U;value++) {
+		double nominal=value<6U?pow(2.0,1.0+value/2.0):pow(2.0,(double)value-2.0);
+		double error=fabs(accuracy-nominal);
+		if(error<best_error){best_error=error;best=value;}
+	}
+	*urai=(uint8_t)best; return 0;
+}
+
+int gnss_beidou_d1_clock_from_rinex(const gnss_nav_record_t *r,
+	const int8_t alpha[4], const int8_t beta[4], beidou_d1_clock_t *f)
+{
+	double toc;
+	int32_t value;
+	unsigned int index;
+	if(r==NULL||alpha==NULL||beta==NULL||f==NULL||r->system!=GNSS_SYSTEM_BEIDOU||
+		strcmp(r->message,"D1")!=0||r->orbit_count<26U) return -1;
+	memset(f,0,sizeof(*f));
+	for(index=0U;index<4U;index++){f->alpha[index]=alpha[index];f->beta[index]=beta[index];}
+	if(!isfinite(r->orbit[0])||!isfinite(r->orbit[18])||!isfinite(r->orbit[21])||
+		!isfinite(r->orbit[22])||!isfinite(r->orbit[23])||!isfinite(r->orbit[25])) return -1;
+	f->aode=(uint8_t)llround(r->orbit[0]); f->aodc=(uint8_t)llround(r->orbit[25]);
+	f->week=(uint16_t)llround(r->orbit[18]); f->health=(uint8_t)llround(r->orbit[21]);
+	if(fabs(r->orbit[0]-f->aode)>1e-6||fabs(r->orbit[25]-f->aodc)>1e-6||
+		fabs(r->orbit[18]-f->week)>1e-6||fabs(r->orbit[21]-f->health)>1e-6||
+		beidou_urai(r->orbit[20],&f->urai)!=0) return -1;
+	toc=calendar_sow(&r->toc); f->toc=(uint32_t)llround(toc/8.0);
+	if(fabs(toc-f->toc*8.0)>1e-3 || fabs(r->orbit[22]*1.0e10)>32767.0 ||
+		fabs(r->orbit[23]*1.0e10)>32767.0) return -1;
+	/* TGD LSB is 0.1 ns = 1e-10 s. */
+	value=(int32_t)llround(r->orbit[22]*1.0e10); f->tgd1=(int16_t)value;
+	value=(int32_t)llround(r->orbit[23]*1.0e10); f->tgd2=(int16_t)value;
+	if(quantize_signed(r->clock_bias,33,&f->af0)!=0||
+		quantize_signed(r->clock_drift,50,&f->af1)!=0||
+		quantize_signed(r->clock_drift_rate,66,&f->af2)!=0) return -1;
+	return f->aode<=31U&&f->aodc<=31U&&f->week<=8191U&&f->health<=1U&&
+		fits_signed(f->tgd1,10U)&&fits_signed(f->tgd2,10U)&&
+		fits_signed(f->af0,24U)&&fits_signed(f->af1,22U)&&fits_signed(f->af2,11U)?0:-1;
 }
 
 static int quantize_signed(double value, int exponent, int32_t *result)

@@ -29,6 +29,9 @@
 - Added GLONASS GNAV system-time string 5 and generic almanac string pairs
   6/7 through 14/15, covering all frame string layouts with range-checked
   sign-magnitude fields and Hamming protection.
+- Added complete BeiDou D1 clock/service subframe 1 and RINEX conversion for
+  BDT week/time, clock polynomial, AODC/AODE, health, URAI and both TGDs;
+  ionosphere coefficients are explicit because they originate in RINEX headers.
 
 ## Unreleased
 

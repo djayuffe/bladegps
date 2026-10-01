@@ -444,6 +444,30 @@ static void test_beidou_d1_ephemeris(void)
 	assert(gnss_beidou_d1_ephemeris_subframes(&fields,0U,sf2,sf3) == -1);
 }
 
+static void test_beidou_d1_clock(void)
+{
+	beidou_d1_clock_t fields = {
+		.health=1U,.aodc=31U,.urai=15U,.aode=30U,.week=8191U,.toc=75599U,
+		.tgd1=-512,.tgd2=511,.alpha={-128,127,-1,1},
+		.beta={1,-1,64,-64},.af0=-8388608,.af1=2097151,.af2=-1024
+	};
+	uint8_t sf[300],info[224];
+	const uint8_t *p;
+	assert(gnss_beidou_d1_clock_subframe(&fields,604799U,sf)==0);
+	recover_beidou_information(sf,info); p=info+38U;
+	assert(unpack_bits(info,15,3)==1U && unpack_bits(info,18,20)==604799U);
+	assert(unpack_bits(p,0,1)==1U && unpack_bits(p,1,5)==31U);
+	assert(unpack_bits(p,6,4)==15U && unpack_bits(p,10,13)==8191U);
+	assert(unpack_bits(p,23,17)==75599U);
+	assert(unpack_bits(p,40,10)==0x200U && unpack_bits(p,50,10)==0x1ffU);
+	assert(unpack_bits(p,60,8)==0x80U && unpack_bits(p,68,8)==0x7fU);
+	assert(unpack_bits(p,124,11)==0x400U);
+	assert(unpack_bits(p,135,24)==0x800000U);
+	assert(unpack_bits(p,159,22)==0x1fffffU && unpack_bits(p,181,5)==30U);
+	fields.toc=75600U;
+	assert(gnss_beidou_d1_clock_subframe(&fields,0U,sf)==-1);
+}
+
 static uint32_t glonass_field(const uint8_t string[85], unsigned int first,
 	unsigned int width)
 {
@@ -552,6 +576,8 @@ static void test_rinex4_mixed_navigation(void)
 	beidou_d1_ephemeris_t beidou_ephemeris;
 	uint8_t beidou_sf2[BEIDOU_NAV_SUBFRAME_BITS];
 	uint8_t beidou_sf3[BEIDOU_NAV_SUBFRAME_BITS];
+	beidou_d1_clock_t beidou_clock;
+	const int8_t zero_iono[4]={0,0,0,0};
 	glonass_gnav_immediate_t glonass_immediate;
 	uint8_t glonass_strings[4][GLONASS_GNAV_STRING_BITS];
 	size_t count = 0;
@@ -587,6 +613,12 @@ static void test_rinex4_mixed_navigation(void)
 	assert(beidou_ephemeris.toe == 11700U);
 	assert(gnss_beidou_d1_ephemeris_subframes(&beidou_ephemeris,93600U,
 		beidou_sf2,beidou_sf3) == 0);
+	assert(gnss_beidou_d1_clock_from_rinex(&records[1],zero_iono,zero_iono,
+		&beidou_clock)==0);
+	assert(beidou_clock.aode==1U && beidou_clock.aodc==1U);
+	assert(beidou_clock.week==809U && beidou_clock.toc==11700U);
+	assert(beidou_clock.health==0U && beidou_clock.urai==0U);
+	assert(beidou_clock.tgd1==230 && beidou_clock.tgd2==230);
 	assert(records[2].system == GNSS_SYSTEM_GLONASS && records[2].prn == 1);
 	assert(strcmp(records[2].message, "FDMA") == 0);
 	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
@@ -656,6 +688,7 @@ int main(void)
 	test_galileo_inav_words();
 	test_beidou_navigation_subframe();
 	test_beidou_d1_ephemeris();
+	test_beidou_d1_clock();
 	test_glonass_immediate_strings();
 	test_glonass_string5();
 	test_glonass_almanac_pair();

@@ -17,6 +17,15 @@ typedef struct {
 	int32_t omega0, argument_of_perigee;
 } beidou_d1_ephemeris_t;
 
+typedef struct {
+	uint8_t health, aodc, urai, aode;
+	uint16_t week;
+	uint32_t toc;
+	int16_t tgd1, tgd2;
+	int8_t alpha[4], beta[4];
+	int32_t af0, af1, af2;
+} beidou_d1_clock_t;
+
 /* D1 and D2 use the same 10-word BCH/interleaving structure. Inputs and output
  * are unpacked bits in MSB/transmission order. */
 int gnss_beidou_nav_encode_subframe(
@@ -36,5 +45,9 @@ int gnss_beidou_d1_ephemeris_subframes(const beidou_d1_ephemeris_t *fields,
 	uint8_t subframe3[BEIDOU_NAV_SUBFRAME_BITS]);
 int gnss_beidou_d1_ephemeris_from_rinex(const gnss_nav_record_t *record,
 	beidou_d1_ephemeris_t *fields);
+int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *fields,
+	uint32_t frame_sow, uint8_t subframe1[BEIDOU_NAV_SUBFRAME_BITS]);
+int gnss_beidou_d1_clock_from_rinex(const gnss_nav_record_t *record,
+	const int8_t alpha[4], const int8_t beta[4], beidou_d1_clock_t *fields);
 
 #endif
