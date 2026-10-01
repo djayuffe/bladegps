@@ -113,6 +113,105 @@ static void test_signal_profiles(void)
 	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
 }
 
+static void test_rf_renderer_and_allocator(void)
+{
+	static const int8_t code[4] = {1,-1,1,-1};
+	static const int8_t data[3] = {1,1,-1};
+	static const int8_t overlay[2] = {1,-1};
+	gnss_rf_channel_t whole = {
+		.enabled=1,.modulation=GNSS_RF_BPSK,.system=GNSS_SYSTEM_GPS,.prn=1U,
+		.carrier_hz=10000000.0,.doppler_hz=137.25,.amplitude=700.0,
+		.data_code=code,.code_length=4U,.code_rate_hz=1000.0,.code_phase=1.25,
+		.data_symbols=data,.data_symbol_count=3U,.data_rate_hz=50.0,.data_phase=0.75,
+		.overlay_symbols=overlay,.overlay_symbol_count=2U,.overlay_rate_hz=25.0,
+		.overlay_phase=0.25,.carrier_phase=0.125
+	};
+	gnss_rf_channel_t split=whole;
+	gnss_rf_candidate_t candidates[] = {
+		{GNSS_SYSTEM_GPS,1U,1575.42e6,2.5e6,0.50,1},
+		{GNSS_SYSTEM_GALILEO,2U,1575.42e6,4.0e6,0.80,1},
+		{GNSS_SYSTEM_BEIDOU,3U,1561.098e6,4.092e6,1.00,1},
+		{GNSS_SYSTEM_GPS,4U,1575.42e6,2.5e6,0.70,0},
+		{GNSS_SYSTEM_GPS,5U,1575.42e6,2.5e6,0.20,1},
+		{GNSS_SYSTEM_GPS,6U,1575.42e6,2.5e6,0.60,1}
+	};
+	int16_t one_block[200], split_blocks[200];
+	size_t selected[2], selected_count=0U;
+
+	assert(gnss_rf_render(&whole,1U,10000000.0,1000000.0,one_block,100U)==0);
+	assert(gnss_rf_render(&split,1U,10000000.0,1000000.0,split_blocks,40U)==0);
+	assert(gnss_rf_render(&split,1U,10000000.0,1000000.0,split_blocks+80U,60U)==0);
+	assert(memcmp(one_block,split_blocks,sizeof(one_block))==0);
+	assert(whole.carrier_phase==split.carrier_phase && whole.code_phase==split.code_phase &&
+		whole.data_phase==split.data_phase && whole.overlay_phase==split.overlay_phase);
+	split=whole; split.data_rate_hz=NAN;
+	assert(gnss_rf_validate_channel(&split,10000000.0,1000000.0)==-1);
+	split=whole; split.modulation=(gnss_rf_modulation_t)99;
+	assert(gnss_rf_validate_channel(&split,10000000.0,1000000.0)==-1);
+
+	/* The 30 MHz test passband includes GPS/Galileo but excludes BeiDou. */
+	assert(gnss_rf_allocate(candidates,6U,1575.42e6,30.0e6,0.30,
+		selected,2U,&selected_count)==0);
+	assert(selected_count==2U && selected[0]==1U && selected[1]==5U);
+}
+
+static void test_constellation_rf_sequences(void)
+{
+	int8_t galileo_b[GALILEO_E1_CODE_LENGTH],galileo_c[GALILEO_E1_CODE_LENGTH];
+	int8_t galileo_secondary[GALILEO_E1C_SECONDARY_LENGTH];
+	int8_t beidou[BEIDOU_B1I_CODE_LENGTH],nh[BEIDOU_B1I_NH_LENGTH];
+	int8_t glonass[GLONASS_L1OF_CODE_LENGTH];
+	int8_t glonass_symbols[GLONASS_L1OF_STRING_SYMBOLS];
+	int8_t nav_symbols[300];
+	uint8_t glonass_string[85]={0},previous=0U;
+	uint8_t nav_bits[300];
+	int16_t iq[256];
+	gnss_rf_channel_t channel;
+	size_t index;
+
+	assert(gnss_galileo_e1_primary_code(1U,GALILEO_E1_COMPONENT_B,galileo_b)==0);
+	assert(gnss_galileo_e1_primary_code(1U,GALILEO_E1_COMPONENT_C,galileo_c)==0);
+	assert(gnss_galileo_e1c_secondary_code(galileo_secondary)==0);
+	for(index=0U;index<300U;index++) nav_bits[index]=(uint8_t)(index&1U);
+	assert(gnss_rf_bits_to_symbols(nav_bits,300U,nav_symbols)==0);
+	memset(&channel,0,sizeof(channel));
+	channel.enabled=1; channel.modulation=GNSS_RF_GALILEO_E1;
+	channel.system=GNSS_SYSTEM_GALILEO; channel.prn=1U;
+	channel.carrier_hz=1575.42e6; channel.amplitude=500.0;
+	channel.data_code=galileo_b; channel.pilot_code=galileo_c;
+	channel.code_length=GALILEO_E1_CODE_LENGTH; channel.code_rate_hz=1.023e6;
+	channel.data_symbols=nav_symbols; channel.data_symbol_count=300U;
+	channel.data_rate_hz=250.0; channel.overlay_symbols=galileo_secondary;
+	channel.overlay_symbol_count=GALILEO_E1C_SECONDARY_LENGTH;
+	channel.overlay_rate_hz=250.0;
+	assert(gnss_rf_render(&channel,1U,1575.42e6,5.0e6,iq,128U)==0);
+
+	assert(gnss_beidou_b1i_code(1U,beidou)==0);
+	assert(gnss_beidou_b1i_nh_code(nh)==0);
+	channel.modulation=GNSS_RF_BPSK; channel.system=GNSS_SYSTEM_BEIDOU;
+	channel.carrier_hz=1561.098e6; channel.data_code=beidou; channel.pilot_code=NULL;
+	channel.code_length=BEIDOU_B1I_CODE_LENGTH; channel.code_rate_hz=2.046e6;
+	channel.data_rate_hz=50.0; channel.overlay_symbols=nh;
+	channel.overlay_symbol_count=BEIDOU_B1I_NH_LENGTH; channel.overlay_rate_hz=1000.0;
+	channel.code_phase=channel.data_phase=channel.overlay_phase=channel.carrier_phase=0.0;
+	assert(gnss_rf_render(&channel,1U,1561.098e6,5.0e6,iq,128U)==0);
+
+	for(index=0U;index<85U;index++) glonass_string[index]=(uint8_t)((index/3U)&1U);
+	assert(gnss_glonass_l1of_symbols(glonass_string,&previous,glonass_symbols)==0);
+	assert(previous<=1U && glonass_symbols[0]==1 && glonass_symbols[1]==-1);
+	assert(gnss_glonass_l1of_code(glonass)==0);
+	channel.system=GNSS_SYSTEM_GLONASS; channel.carrier_hz=1602.0e6;
+	channel.data_code=glonass; channel.code_length=GLONASS_L1OF_CODE_LENGTH;
+	channel.code_rate_hz=0.511e6; channel.data_symbols=glonass_symbols;
+	channel.data_symbol_count=GLONASS_L1OF_STRING_SYMBOLS; channel.data_rate_hz=100.0;
+	channel.overlay_symbols=NULL; channel.overlay_symbol_count=0U;
+	channel.overlay_rate_hz=channel.overlay_phase=0.0;
+	channel.code_phase=channel.data_phase=channel.carrier_phase=0.0;
+	assert(gnss_rf_render(&channel,1U,1602.0e6,2.0e6,iq,128U)==0);
+	glonass_string[2]=2U;
+	assert(gnss_glonass_l1of_symbols(glonass_string,&previous,glonass_symbols)==-1);
+}
+
 static uint32_t code_bit_checksum(const int8_t *chips, size_t count)
 {
 	uint32_t hash = UINT32_C(2166136261);
@@ -699,6 +798,8 @@ int main(void)
 	test_ca_code_balance();
 	test_ephemeris_selection();
 	test_signal_profiles();
+	test_rf_renderer_and_allocator();
+	test_constellation_rf_sequences();
 	test_multi_gnss_codes();
 	test_multi_gnss_fec();
 	test_galileo_inav_pages();

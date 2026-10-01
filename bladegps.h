@@ -19,6 +19,7 @@
 #include "gnss_galileo_nav.h"
 #include "gnss_beidou_nav.h"
 #include "gnss_glonass_nav.h"
+#include "gnss_rf.h"
 
 #define DEFAULT_TX_FREQUENCY	1575420000U
 #define DEFAULT_TX_SAMPLERATE	2600000U

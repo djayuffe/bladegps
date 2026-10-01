@@ -19,6 +19,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `gnss_galileo_nav.c` / `gnss_galileo_nav.h` | Galileo nominal E1-B I/NAV vertical-page construction, CRC coverage, FEC/interleaving, sync/SSP insertion, and 30-second word schedule. |
 | `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, common subframe headers, and D1 ephemeris subframes 2/3 with RINEX-to-ICD scaling. |
 | `gnss_glonass_nav.c` / `gnss_glonass_nav.h` | GLONASS RINEX A15 conversion and GNAV immediate strings 1-4, including sign-magnitude fields, UTC(SU)+3 timing, four-year day index, and Hamming-protected 85-bit strings. |
+| `gnss_rf.c` / `gnss_rf.h` | Shared mixed-constellation channel validation, elevation-ranked allocation, continuous carrier/code/data/overlay phase, SC16 Q11 mixing, Galileo E1 CBOC, BPSK overlay modulation, and GLONASS relative/meander symbol formation. |
 | `gpssim.c` | GPS signal model: ephemeris parsing, satellite geometry, navigation message generation, channel allocation, motion parsing, I/Q synthesis, and GPS producer thread. |
 | `gpssim.h` | GPS constants and data structures: times, ephemeris records, pseudorange records, and channel state. |
 | `getch.c` / `getch.h` | POSIX keyboard helpers used by interactive mode. Windows uses `conio.h`. |
@@ -56,6 +57,16 @@ bladegps.c main()
 ```
 
 The FIFO decouples synthesis from hardware transmission. The producer generates `tx_sample_rate / 10` samples per 100 ms block, while the TX thread consumes `SAMPLES_PER_BUFFER` samples per libbladeRF transfer.
+
+The shared `gnss_rf` layer is deliberately independent of the GPS-only producer.
+It can combine enabled channels from different constellations when every occupied
+band fits the configured complex passband. Each channel retains carrier, ranging
+code, data-symbol, and overlay-code phase between calls, so changing producer
+block size does not introduce discontinuities. Its allocator filters unhealthy,
+below-mask, malformed, and out-of-band candidates before retaining the highest
+elevation signals. Production CLI selection remains fail-closed until the
+constellation-specific scheduler supplies this layer with time-aligned navigation
+symbols and validated ranges.
 
 ## Command-Line Lifecycle
 

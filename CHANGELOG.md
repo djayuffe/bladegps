@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added the shared mixed-GNSS RF renderer with sample-continuous carrier, code,
+  navigation-symbol and overlay-code phases, SC16 Q11 saturation, passband
+  enforcement, and elevation-ranked healthy-satellite allocation.
+- Added Galileo E1-B/E1-C equal-power CBOC composition using the ICD-defined
+  opposite pilot sign, BeiDou D1 Neumann-Hoffman overlay support, GLONASS
+  relative-code/meander/time-mark formatting, and per-channel FDMA offsets.
+- Added split-block equivalence, invalid-state, passband, capacity-pressure, and
+  constellation-specific RF-path regression tests.
+
 - Corrected the Galileo convolutional encoder register orientation against all
   three official OS SIS ICD 2.2 SSP symbol vectors.
 - Added nominal E1-B I/NAV vertical-page assembly with exact protected-field
@@ -34,8 +43,6 @@
   ionosphere coefficients are explicit because they originate in RINEX headers.
 - Added validated assembly of complete 15-string GLONASS GNAV frames from
   immediate, system-time, and five almanac records.
-
-## Unreleased
 
 - Adds typed RINEX 3/4 navigation ingestion for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA records.
 - Preserves blank RINEX fields and skips unrelated RINEX 4 STO/ION/EOP and unsupported ephemeris message blocks without losing record synchronization.
