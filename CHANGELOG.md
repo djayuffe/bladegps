@@ -23,6 +23,9 @@
 - Added GLONASS GNAV immediate strings 1-4 with exact ICD bit positions,
   sign-magnitude numeric fields, time/health/control fields, and Hamming-protected
   85-bit output strings.
+- Added GLONASS RINEX A15 conversion for state vectors, clock/frequency terms,
+  health/status flags, accuracy and age fields, including UTC(SU)+3 message time
+  and the GLONASS four-year calendar-day index.
 
 ## Unreleased
 

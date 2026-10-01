@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "gnss_nav.h"
+
 #define GLONASS_GNAV_STRING_BITS 85U
 
 typedef struct {
@@ -17,5 +19,7 @@ typedef struct {
  * signed quantities use the GLONASS sign-magnitude representation. */
 int gnss_glonass_gnav_immediate_strings(const glonass_gnav_immediate_t *fields,
 	uint8_t strings[4][GLONASS_GNAV_STRING_BITS]);
+int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *record,
+	glonass_gnav_immediate_t *fields);
 
 #endif

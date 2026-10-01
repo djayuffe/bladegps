@@ -511,6 +511,8 @@ static void test_rinex4_mixed_navigation(void)
 	beidou_d1_ephemeris_t beidou_ephemeris;
 	uint8_t beidou_sf2[BEIDOU_NAV_SUBFRAME_BITS];
 	uint8_t beidou_sf3[BEIDOU_NAV_SUBFRAME_BITS];
+	glonass_gnav_immediate_t glonass_immediate;
+	uint8_t glonass_strings[4][GLONASS_GNAV_STRING_BITS];
 	size_t count = 0;
 	double position[3];
 	double velocity[3];
@@ -549,6 +551,14 @@ static void test_rinex4_mixed_navigation(void)
 	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
 	assert(fabs(records[2].orbit[0] + 13904.48925781) < 1.0e-7);
 	assert(records[2].orbit[14] == 2.0);
+	assert(gnss_glonass_gnav_from_rinex(&records[2],&glonass_immediate) == 0);
+	assert(glonass_immediate.tk_seconds == 10320U);
+	assert(glonass_immediate.tb == 11U && glonass_immediate.nt == 259U);
+	assert(glonass_immediate.slot == 1U && glonass_immediate.mode == 1U);
+	assert(glonass_immediate.p2 == 1U && glonass_immediate.p == 3U);
+	assert(glonass_immediate.ft == 2U && glonass_immediate.bn == 0U);
+	assert(gnss_glonass_gnav_immediate_strings(&glonass_immediate,
+		glonass_strings) == 0);
 	assert(gnss_propagate_kepler(&records[0], records[0].orbit[8], position,
 		velocity, &clock_bias, &clock_drift) == 0);
 	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);

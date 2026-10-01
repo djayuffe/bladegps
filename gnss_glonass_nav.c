@@ -1,6 +1,7 @@
 #include "gnss_glonass_nav.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -78,4 +79,88 @@ int gnss_glonass_gnav_immediate_strings(const glonass_gnav_immediate_t *f,
 		finish_string(data[1],strings[1]) == 0 &&
 		finish_string(data[2],strings[2]) == 0 &&
 		finish_string(data[3],strings[3]) == 0 ? 0 : -1;
+}
+
+static int quantize(double value, int exponent, int32_t *result)
+{
+	double scaled;
+	if (!isfinite(value) || result == NULL) return -1;
+	scaled = ldexp(value, exponent);
+	if (scaled < (double)INT32_MIN || scaled > (double)INT32_MAX) return -1;
+	*result = (int32_t)llround(scaled);
+	return 0;
+}
+
+static int leap_year(int year)
+{
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0);
+}
+
+static int day_of_year(int year, int month, int day)
+{
+	static const int before_month[12] =
+		{0,31,59,90,120,151,181,212,243,273,304,334};
+	if (month < 1 || month > 12 || day < 1 || day > 31) return -1;
+	return before_month[month-1] + day + (month > 2 && leap_year(year));
+}
+
+static int four_year_day(const gnss_calendar_time_t *time)
+{
+	int start = time->year;
+	int total = 0, year;
+	while (!leap_year(start)) start--;
+	for (year=start; year<time->year; year++) total += leap_year(year) ? 366 : 365;
+	return total + day_of_year(time->year,time->month,time->day);
+}
+
+int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *r,
+	glonass_gnav_immediate_t *f)
+{
+	int32_t status, health_flags;
+	int nt;
+	unsigned int axis;
+	double frame_time;
+	if (r == NULL || f == NULL || r->system != GNSS_SYSTEM_GLONASS ||
+		strcmp(r->message,"FDMA") != 0 ||
+		r->model != GNSS_NAV_GLONASS_STATE_VECTOR || r->orbit_count < 16U ||
+		r->prn == 0U || r->prn > 31U || !isfinite(r->clock_drift_rate)) return -1;
+	memset(f,0,sizeof(*f));
+	frame_time = fmod(r->clock_drift_rate,604800.0);
+	if (frame_time < 0.0) frame_time += 604800.0;
+	frame_time = fmod(frame_time,86400.0);
+	f->tk_seconds = (uint32_t)llround(fmod(frame_time+10800.0,86400.0));
+	if (fabs(fmod(frame_time+10800.0,86400.0)-f->tk_seconds) > 1.0e-3 ||
+		(f->tk_seconds%30U)!=0U) return -1;
+	f->tb = (uint8_t)((((unsigned int)r->toc.hour*3600U+
+		(unsigned int)r->toc.minute*60U+(unsigned int)llround(r->toc.second)+10800U)
+		%86400U)/900U);
+	if (!isfinite(r->orbit[3]) || r->orbit[3] < 0.0 || r->orbit[3] > 1.0 ||
+		fabs(r->orbit[3]-llround(r->orbit[3])) > 1.0e-6) return -1;
+	f->bn = (uint8_t)((uint32_t)llround(r->orbit[3]) << 2);
+	f->slot = (uint8_t)r->prn;
+	nt = four_year_day(&r->toc);
+	if (nt < 1 || nt > 1461) return -1;
+	f->nt = (uint16_t)nt;
+	if (!isfinite(r->orbit[12]) || !isfinite(r->orbit[14]) || !isfinite(r->orbit[15]))
+		return -1;
+	status=(int32_t)llround(r->orbit[12]); health_flags=(int32_t)llround(r->orbit[15]);
+	if (status<0 || status>511 || health_flags<0 || health_flags>7 ||
+		fabs(r->orbit[12]-status)>1e-6 || fabs(r->orbit[14]-llround(r->orbit[14]))>1e-6)
+		return -1;
+	f->mode=(uint8_t)((status>>7)&3); f->p4=(uint8_t)((status>>6)&1);
+	f->p3=(uint8_t)((status>>5)&1); f->p2=(uint8_t)((status>>4)&1);
+	f->p1=(uint8_t)((status>>2)&3); f->p=(uint8_t)(status&3);
+	f->ft=(uint8_t)llround(r->orbit[14]); f->ln=(uint8_t)((health_flags>>2)&1);
+	f->en=(uint8_t)llround(r->orbit[11]);
+	if (f->ft>15U || f->en>31U || quantize(-r->clock_bias,30,&f->tau)!=0 ||
+		quantize(r->clock_drift,40,&f->gamma)!=0 ||
+		quantize(r->orbit[13],30,&f->delta_tau)!=0) return -1;
+	for (axis=0U;axis<3U;axis++) {
+		size_t base=axis*4U;
+		if (quantize(r->orbit[base],11,&f->position[axis])!=0 ||
+			quantize(r->orbit[base+1U],20,&f->velocity[axis])!=0 ||
+			quantize(r->orbit[base+2U],30,&f->acceleration[axis])!=0)
+			return -1;
+	}
+	return 0;
 }
