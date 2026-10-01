@@ -15,6 +15,7 @@ bladeGPS is a real-time GNSS simulator framework for bladeRF. Its implemented pr
 | `galileo_e1_codes.c` | All 50 E1-B and 50 E1-C primary memory codes from the Galileo OS SIS ICD v2.2 electronic Annex C. |
 | `gnss_nav.c` / `gnss_nav.h` | Typed mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA. |
 | `gnss_orbit.c` / `gnss_orbit.h` | Constellation-aware Keplerian, BeiDou GEO, clock/relativity, and GLONASS numerical propagation models. |
+| `gnss_geometry.c` / `gnss_geometry.h` | Iterative transmit-time observations, Earth-rotation correction, azimuth/elevation, satellite clock correction, range rate, Doppler, and pseudorange-derived initial code/carrier phases. |
 | `gnss_fec.c` / `gnss_fec.h` | Galileo CRC-24Q/convolutional/interleaving primitives and BeiDou BCH/interleaving primitives. |
 | `gnss_galileo_nav.c` / `gnss_galileo_nav.h` | Galileo nominal E1-B I/NAV vertical-page construction, CRC coverage, FEC/interleaving, sync/SSP insertion, and 30-second word schedule. |
 | `gnss_beidou_nav.c` / `gnss_beidou_nav.h` | BeiDou D1/D2 word coding and interleaving, D1 clock/ephemeris subframes 1-3, D2 GEO basic-navigation pages 1-10, shared almanac payloads, format-specific schedules, and RINEX-to-ICD scaling. |

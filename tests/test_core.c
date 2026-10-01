@@ -803,6 +803,11 @@ static void test_rinex4_mixed_navigation(void)
 	double clock_bias;
 	double clock_drift;
 	double radius;
+	gnss_observation_t observation;
+	double receiver[3],receiver_velocity[3]={0.0,0.0,0.0};
+	double receiver_llh[3]={59.3293/R2D,18.0686/R2D,30.0};
+	datetime_t observation_time;
+	gpstime_t observation_gps;
 
 	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", records, 4, &count) == 0);
 	assert(count == 3);
@@ -823,6 +828,12 @@ static void test_rinex4_mixed_navigation(void)
 	assert(unpack_bits(galileo_words[3],54,14) == 2920U);
 	assert(gnss_schedule_galileo_e1(&records[0],2300U,175200U,galileo_cycle)==0);
 	assert(galileo_cycle[0]==1 || galileo_cycle[0]==-1);
+	llh2xyz(receiver_llh,receiver);
+	assert(gnss_observe(&records[0],records[0].orbit[8],receiver,receiver_velocity,
+		1575.42e6,1.023e6,GALILEO_E1_CODE_LENGTH,&observation)==0);
+	assert(observation.geometric_range_m>1.0e7 && observation.geometric_range_m<5.0e7);
+	assert(observation.code_phase_chips>=0.0 &&
+		observation.code_phase_chips<GALILEO_E1_CODE_LENGTH);
 	assert(records[1].system == GNSS_SYSTEM_BEIDOU && records[1].prn == 20);
 	assert(strcmp(records[1].message, "D1") == 0);
 	assert(records[1].orbit_count == 26U);
@@ -856,6 +867,14 @@ static void test_rinex4_mixed_navigation(void)
 		glonass_strings) == 0);
 	assert(gnss_schedule_glonass(&records[2],glonass_cycle)==0);
 	assert(glonass_cycle[0]==1 || glonass_cycle[0]==-1);
+	observation_time.y=records[2].toc.year; observation_time.m=records[2].toc.month;
+	observation_time.d=records[2].toc.day; observation_time.hh=records[2].toc.hour;
+	observation_time.mm=records[2].toc.minute; observation_time.sec=records[2].toc.second;
+	date2gps(&observation_time,&observation_gps);
+	assert(gnss_observe(&records[2],observation_gps.sec,receiver,receiver_velocity,
+		1602.0e6,0.511e6,GLONASS_L1OF_CODE_LENGTH,&observation)==0);
+	assert(isfinite(observation.doppler_hz) && observation.carrier_phase_rad>=0.0 &&
+		observation.carrier_phase_rad<2.0*PI);
 	assert(gnss_propagate_kepler(&records[0], records[0].orbit[8], position,
 		velocity, &clock_bias, &clock_drift) == 0);
 	radius = sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);

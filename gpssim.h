@@ -173,6 +173,8 @@ void date2gps(const datetime_t *t, gpstime_t *g);
 void gps2date(const gpstime_t *g, datetime_t *t);
 void llh2xyz(const double *llh, double *xyz);
 void xyz2llh(const double *xyz, double *llh);
+void ltcmat(const double *llh, double t[3][3]);
+void ecef2neu(const double *xyz, double t[3][3], double *neu);
 void codegen(int *ca, int prn);
 unsigned long computeChecksum(unsigned long source, int nib);
 double subGpsTime(gpstime_t g1, gpstime_t g0);

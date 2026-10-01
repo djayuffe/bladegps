@@ -21,6 +21,9 @@
 - Added deterministic transmitter symbol-cycle scheduling for Galileo E1 I/NAV,
   BeiDou D1, BeiDou D2 GEO, and GLONASS GNAV, including valid FEC-protected
   reserved service subframes and regression coverage from mixed RINEX records.
+- Added shared live-observation geometry with iterative transmit time, Earth-rotation
+  correction, satellite clock/range-rate correction, local azimuth/elevation,
+  Doppler, and pseudorange-derived code/carrier phase initialization.
 
 - Corrected the Galileo convolutional encoder register orientation against all
   three official OS SIS ICD 2.2 SSP symbol vectors.

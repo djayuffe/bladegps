@@ -21,6 +21,7 @@
 #include "gnss_glonass_nav.h"
 #include "gnss_rf.h"
 #include "gnss_schedule.h"
+#include "gnss_geometry.h"
 
 #define DEFAULT_TX_FREQUENCY	1575420000U
 #define DEFAULT_TX_SAMPLERATE	2600000U
