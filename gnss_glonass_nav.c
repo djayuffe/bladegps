@@ -81,6 +81,50 @@ int gnss_glonass_gnav_immediate_strings(const glonass_gnav_immediate_t *f,
 		finish_string(data[3],strings[3]) == 0 ? 0 : -1;
 }
 
+int gnss_glonass_gnav_string5(const glonass_gnav_string5_t *f,
+	uint8_t string[85])
+{
+	uint8_t data[77] = {0};
+	if (f == NULL || string == NULL || f->na < 1U || f->na > 1461U ||
+		f->n4 < 1U || f->n4 > 31U || f->ln > 1U ||
+		set_unsigned(data,9U,1U,f->ln) != 0 ||
+		set_sign_magnitude(data,10U,22U,f->tau_gps) != 0 ||
+		set_unsigned(data,32U,5U,f->n4) != 0 ||
+		set_sign_magnitude(data,38U,32U,f->tau_c) != 0 ||
+		set_unsigned(data,70U,11U,f->na) != 0 ||
+		set_unsigned(data,81U,4U,5U) != 0)
+		return -1;
+	return finish_string(data,string);
+}
+
+int gnss_glonass_gnav_almanac_pair(const glonass_gnav_almanac_t *f,
+	unsigned int number, uint8_t even[85], uint8_t odd[85])
+{
+	uint8_t first[77] = {0}, second[77] = {0};
+	if (f == NULL || even == NULL || odd == NULL || number < 6U || number > 14U ||
+		(number&1U)!=0U || f->slot < 1U || f->slot > 31U ||
+		f->satellite_type > 3U || f->healthy > 1U || f->frequency > 31U ||
+		f->ln > 1U || f->eccentricity >= (UINT32_C(1)<<15) ||
+		f->ascending_time >= (UINT32_C(1)<<21) ||
+		set_unsigned(first,9U,15U,f->eccentricity)!=0 ||
+		set_sign_magnitude(first,24U,18U,f->delta_i)!=0 ||
+		set_sign_magnitude(first,42U,21U,f->lambda)!=0 ||
+		set_sign_magnitude(first,63U,10U,f->tau)!=0 ||
+		set_unsigned(first,73U,5U,f->slot)!=0 ||
+		set_unsigned(first,78U,2U,f->satellite_type)!=0 ||
+		set_unsigned(first,80U,1U,f->healthy)!=0 ||
+		set_unsigned(first,81U,4U,number)!=0 ||
+		set_unsigned(second,9U,1U,f->ln)!=0 ||
+		set_unsigned(second,10U,5U,f->frequency)!=0 ||
+		set_sign_magnitude(second,15U,7U,f->delta_t_rate)!=0 ||
+		set_sign_magnitude(second,22U,22U,f->delta_t)!=0 ||
+		set_unsigned(second,44U,21U,f->ascending_time)!=0 ||
+		set_sign_magnitude(second,65U,16U,f->omega)!=0 ||
+		set_unsigned(second,81U,4U,number+1U)!=0)
+		return -1;
+	return finish_string(first,even)==0 && finish_string(second,odd)==0 ? 0 : -1;
+}
+
 static int quantize(double value, int exponent, int32_t *result)
 {
 	double scaled;

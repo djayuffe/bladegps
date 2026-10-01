@@ -491,6 +491,47 @@ static void test_glonass_immediate_strings(void)
 	assert(gnss_glonass_gnav_immediate_strings(&fields,strings) == -1);
 }
 
+static void test_glonass_string5(void)
+{
+	glonass_gnav_string5_t fields = {
+		.na=1461U, .n4=31U, .ln=1U,
+		.tau_c=-INT32_MAX, .tau_gps=1048575
+	};
+	uint8_t string[GLONASS_GNAV_STRING_BITS];
+	assert(gnss_glonass_gnav_string5(&fields,string) == 0);
+	assert(glonass_field(string,9,1) == 1U);
+	assert(glonass_field(string,10,21) == 1048575U);
+	assert(glonass_field(string,31,1) == 0U);
+	assert(glonass_field(string,32,5) == 31U);
+	assert(glonass_field(string,38,31) == UINT32_C(0x7fffffff));
+	assert(glonass_field(string,69,1) == 1U);
+	assert(glonass_field(string,70,11) == 1461U);
+	assert(glonass_field(string,81,4) == 5U);
+	fields.n4=0U;
+	assert(gnss_glonass_gnav_string5(&fields,string) == -1);
+}
+
+static void test_glonass_almanac_pair(void)
+{
+	glonass_gnav_almanac_t fields = {
+		.slot=24U,.satellite_type=1U,.healthy=1U,.frequency=31U,.ln=0U,
+		.tau=-511,.lambda=-1048575,.delta_i=131071,.delta_t=-2097151,
+		.delta_t_rate=63,.omega=-32767,.eccentricity=32767U,
+		.ascending_time=UINT32_C(1234567)
+	};
+	uint8_t even[85],odd[85];
+	assert(gnss_glonass_gnav_almanac_pair(&fields,6U,even,odd)==0);
+	assert(glonass_field(even,9,15)==32767U);
+	assert(glonass_field(even,41,1)==0U);
+	assert(glonass_field(even,42,20)==1048575U && glonass_field(even,62,1)==1U);
+	assert(glonass_field(even,73,5)==24U && glonass_field(even,81,4)==6U);
+	assert(glonass_field(odd,10,5)==31U);
+	assert(glonass_field(odd,22,21)==2097151U && glonass_field(odd,43,1)==1U);
+	assert(glonass_field(odd,44,21)==UINT32_C(1234567));
+	assert(glonass_field(odd,81,4)==7U);
+	assert(gnss_glonass_gnav_almanac_pair(&fields,7U,even,odd)==-1);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -616,6 +657,8 @@ int main(void)
 	test_beidou_navigation_subframe();
 	test_beidou_d1_ephemeris();
 	test_glonass_immediate_strings();
+	test_glonass_string5();
+	test_glonass_almanac_pair();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32

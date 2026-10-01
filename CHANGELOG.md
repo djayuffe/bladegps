@@ -26,6 +26,9 @@
 - Added GLONASS RINEX A15 conversion for state vectors, clock/frequency terms,
   health/status flags, accuracy and age fields, including UTC(SU)+3 message time
   and the GLONASS four-year calendar-day index.
+- Added GLONASS GNAV system-time string 5 and generic almanac string pairs
+  6/7 through 14/15, covering all frame string layouts with range-checked
+  sign-magnitude fields and Hamming protection.
 
 ## Unreleased
 
