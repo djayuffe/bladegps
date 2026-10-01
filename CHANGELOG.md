@@ -32,6 +32,8 @@
 - Added complete BeiDou D1 clock/service subframe 1 and RINEX conversion for
   BDT week/time, clock polynomial, AODC/AODE, health, URAI and both TGDs;
   ionosphere coefficients are explicit because they originate in RINEX headers.
+- Added validated assembly of complete 15-string GLONASS GNAV frames from
+  immediate, system-time, and five almanac records.
 
 ## Unreleased
 

@@ -6,6 +6,7 @@
 #include "gnss_nav.h"
 
 #define GLONASS_GNAV_STRING_BITS 85U
+#define GLONASS_GNAV_FRAME_STRINGS 15U
 
 typedef struct {
 	uint32_t tk_seconds;
@@ -39,5 +40,9 @@ int gnss_glonass_gnav_almanac_pair(const glonass_gnav_almanac_t *fields,
 	unsigned int even_string_number,
 	uint8_t even_string[GLONASS_GNAV_STRING_BITS],
 	uint8_t odd_string[GLONASS_GNAV_STRING_BITS]);
+int gnss_glonass_gnav_frame(const glonass_gnav_immediate_t *immediate,
+	const glonass_gnav_string5_t *time_data,
+	const glonass_gnav_almanac_t almanacs[5],
+	uint8_t frame[GLONASS_GNAV_FRAME_STRINGS][GLONASS_GNAV_STRING_BITS]);
 
 #endif

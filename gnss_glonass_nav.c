@@ -125,6 +125,20 @@ int gnss_glonass_gnav_almanac_pair(const glonass_gnav_almanac_t *f,
 	return finish_string(first,even)==0 && finish_string(second,odd)==0 ? 0 : -1;
 }
 
+int gnss_glonass_gnav_frame(const glonass_gnav_immediate_t *immediate,
+	const glonass_gnav_string5_t *time_data,
+	const glonass_gnav_almanac_t almanacs[5], uint8_t frame[15][85])
+{
+	unsigned int pair;
+	if (immediate==NULL || time_data==NULL || almanacs==NULL || frame==NULL ||
+		gnss_glonass_gnav_immediate_strings(immediate,frame)!=0 ||
+		gnss_glonass_gnav_string5(time_data,frame[4])!=0) return -1;
+	for(pair=0U;pair<5U;pair++)
+		if(gnss_glonass_gnav_almanac_pair(&almanacs[pair],6U+pair*2U,
+			frame[5U+pair*2U],frame[6U+pair*2U])!=0) return -1;
+	return 0;
+}
+
 static int quantize(double value, int exponent, int32_t *result)
 {
 	double scaled;

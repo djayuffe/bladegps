@@ -556,6 +556,23 @@ static void test_glonass_almanac_pair(void)
 	assert(gnss_glonass_gnav_almanac_pair(&fields,7U,even,odd)==-1);
 }
 
+static void test_glonass_frame(void)
+{
+	glonass_gnav_immediate_t immediate={0};
+	glonass_gnav_string5_t time_data={.na=1U,.n4=1U};
+	glonass_gnav_almanac_t almanacs[5];
+	uint8_t frame[15][85];
+	unsigned int index;
+	immediate.slot=1U; immediate.nt=1U;
+	memset(almanacs,0,sizeof(almanacs));
+	for(index=0U;index<5U;index++) almanacs[index].slot=(uint8_t)(index+1U);
+	assert(gnss_glonass_gnav_frame(&immediate,&time_data,almanacs,frame)==0);
+	for(index=0U;index<15U;index++)
+		assert(glonass_field(frame[index],81,4)==index+1U);
+	almanacs[4].slot=0U;
+	assert(gnss_glonass_gnav_frame(&immediate,&time_data,almanacs,frame)==-1);
+}
+
 static void test_llh_motion(void)
 {
 	double storage[2][3];
@@ -692,6 +709,7 @@ int main(void)
 	test_glonass_immediate_strings();
 	test_glonass_string5();
 	test_glonass_almanac_pair();
+	test_glonass_frame();
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32
