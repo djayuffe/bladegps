@@ -36,7 +36,21 @@ typedef struct {
 	size_t orbit_count;
 } gnss_nav_record_t;
 
+typedef struct {
+	double alpha[4];
+	double beta[4];
+} gnss_klobuchar_t;
+
 int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	size_t capacity, size_t *record_count);
+
+/* Allocate and load every supported ephemeris record in a RINEX 3/4 file.
+ * The caller owns *records and must release it with free(). */
+int gnss_load_rinex_nav(const char *path, gnss_nav_record_t **records,
+	size_t *record_count);
+
+/* Return 0 with the last BeiDou Klobuchar model in the file, 1 when none is
+ * present, or -1 when a matching record is malformed. */
+int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model);
 
 #endif

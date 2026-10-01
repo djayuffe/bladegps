@@ -79,12 +79,12 @@ List the known signal profiles before configuring a run:
 ./bladegps -L
 ```
 
-The status column is authoritative. Non-GPS profiles require an explicit mixed RINEX 3/4 file with `-e`.
+The status column is authoritative. Non-GPS profiles use a supplied mixed RINEX 3/4 file or auto-download a daily mixed file when `-e` is omitted.
 
 ```text
 Usage: bladegps [options]
 Options:
-  -e <nav_file>    RINEX navigation file (GPS auto-downloads if omitted)
+  -e <nav_file>    RINEX navigation file (daily broadcast data auto-downloads if omitted)
   -u <user_motion> User motion file (dynamic mode)
   -p <llh_motion>  Geodetic CSV motion: time,latitude,longitude,height
   -g <nmea_gga>    NMEA GGA stream (dynamic mode)
@@ -116,9 +116,9 @@ Automatic ephemeris download example:
 ./bladegps -l 59.3293,18.0686,30 -d 60
 ```
 
-When `-e` is omitted, bladeGPS downloads the daily GPS broadcast ephemeris from NOAA/NGS CORS, then falls back to the BKG IGS archive if NOAA is unavailable. It uses the `-t` scenario date if provided, otherwise the current UTC date. The downloaded file is saved as `brdcDDD0.YYn` in the working directory and reused on later runs.
+When `-e` is omitted, GPS downloads daily RINEX 2 navigation from NOAA/NGS CORS and then BKG. Galileo, BeiDou, and GLONASS try BKG's daily `BRDC00IGS`, `BRDC00WRD`, and `BRDM00DLR` mixed-navigation products in order. The downloader uses the `-t` scenario date if provided, otherwise the current UTC date, saves the decompressed file in the working directory, and reuses it on later runs.
 
-The downloader writes to temporary `.tmp` files first, verifies that both the compressed and decompressed files were created, then renames them into place. Failed downloads or decompression errors clean up partial output and print a manual `-e <gps_nav>` fallback hint.
+The downloader writes to temporary `.tmp` files first, verifies that both the compressed and decompressed files were created, then renames them into place. Failed downloads or decompression errors clean up partial output and print a manual `-e <nav_file>` fallback hint.
 
 Galileo example using a mixed RINEX 3/4 navigation file:
 
@@ -127,7 +127,7 @@ Galileo example using a mixed RINEX 3/4 navigation file:
   -l 59.3293,18.0686,30 -d 60
 ```
 
-Use `-S beidou-b1i` or `-S glonass-l1of` for those production backends. The
+Use `-S beidou-b1i` or `-S glonass-l1of` for those integrated backends. The
 selected center frequency, sample rate, and bandwidth default to the profile's
 safe values and can be overridden with `-f`, `-r`, and `-b`.
 
@@ -192,27 +192,31 @@ Latitude is limited to -90..90 degrees and longitude to -180..180 degrees. Recor
 | Profile | Constellation | Nominal carrier | Status | Notes |
 | --- | --- | ---: | --- | --- |
 | `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-32 |
-| `galileo-e1` | Galileo | 1575.42 MHz | Planned | Codes, CBOC primitives, RINEX/orbit, I/NAV words/pages and FEC are implemented; RF channel integration and optional almanac/FEC2 remain |
-| `beidou-b1i` | BeiDou | 1561.098 MHz | Planned | Codes, RINEX/orbit and complete D1 subframes 1–3 are implemented; D1 almanac, D2 payload pages and RF channel integration remain |
-| `glonass-l1of` | GLONASS | 1602 MHz base | Planned | Code, FDMA carriers, RINEX/orbit and complete 15-string GNAV frames are implemented; relative/meander modulation and RF channel integration remain |
+| `galileo-e1` | Galileo | 1575.42 MHz | Software implemented | E1-B/C codes, CBOC, mixed-RINEX orbit/clock, scheduled I/NAV ephemeris/service pages, dummy substitution for unavailable optional service words, geometry, allocation and RF synthesis |
+| `beidou-b1i` | BeiDou | 1561.098 MHz | Software implemented | PRN 1–63 codes, D1/D2 selection, ephemeris/clock/ionosphere pages, geometry, NH overlay, allocation and RF synthesis |
+| `glonass-l1of` | GLONASS | 1602 MHz base | Software implemented | L1OF code, FDMA slot carriers, state-vector propagation, immediate GNAV/time strings, safe unavailable-almanac marking, relative/meander modulation and RF synthesis |
 
-Selecting a planned profile returns an error. This prevents an unsupported constellation name from silently producing a GPS waveform. See [MULTI_GNSS.md](MULTI_GNSS.md) for the implementation contract and validation gates.
+Unknown or non-implemented profiles fail closed instead of silently producing a GPS waveform. Non-GPS paths consume either a supplied or automatically downloaded mixed RINEX 3/4 navigation file. See [MULTI_GNSS.md](MULTI_GNSS.md) for the exact payload boundaries and validation status.
 
-The source tree already contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping. These primitives do not change a profile to `implemented`: a transmit backend also requires complete navigation messages, constellation-specific ephemeris/time handling, channel mixing, and independent receiver validation.
+The source tree contains tested signal primitives for all 63 BeiDou B1I ranging-code assignments, the GLONASS L1OF ranging code and FDMA carrier slots, all 50 official Galileo E1-B and E1-C primary codes, and Galileo CBOC shaping.
 
-The multi-GNSS foundation includes a typed RINEX 3/4 reader; tested Galileo/BeiDou Keplerian, BeiDou GEO, and GLONASS state-vector propagation; constellation ranging codes; and the navigation-message layers summarized above. They remain isolated from RF output until each signal's modulation/channel path and the multi-constellation mixer pass the acceptance gates.
+The typed RINEX 3/4 loader, Galileo/BeiDou Keplerian propagation, BeiDou GEO transform, GLONASS state-vector propagation, navigation scheduling, modulation, channel allocation and FIFO producer are connected to RF output. The CLI selects one signal profile per run; `gnss_rf` is constellation-neutral but the command-line producer does not yet combine GPS/Galileo/BeiDou/GLONASS profiles in one transmission. Hardware/receiver validation remains environment-dependent and is not claimed by the software tests.
 
 ## Implementation notes
 
 - The simulator generates 0.1 second blocks at the selected sample rate for bladeRF SC16 transmission; GPS defaults to 2.6 Msps.
 - The requested duration emits the complete number of 100 ms blocks.
 - The closest in-fit broadcast record is selected independently per PRN and refreshed at navigation-frame boundaries.
+- Non-GPS ephemeris selection compares complete GPS-aligned calendar weeks, so a record from an older week cannot win merely because it has the same seconds-of-week.
+- Non-GPS 30-second navigation cycles are regenerated at every cycle boundary; Galileo GST TOW and BeiDou BDT SOW therefore advance instead of repeating a cached frame.
+- Mixed RINEX files are counted and allocated dynamically; there is no fixed 4096-record truncation ceiling.
+- BeiDou Klobuchar coefficients are read from RINEX 3 `BDSA`/`BDSB` headers or RINEX 4 `ION C ... D1D2` records and range-checked at their ICD scales.
 - Ephemeris handovers rebuild LNAV data while preserving range-rate continuity.
 - FIFO access between the GPS generation thread and TX thread is protected with the GPS mutex.
 - Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
-- If `-e` is omitted, the downloader first fetches NOAA/NGS CORS RINEX v2 daily GPS navigation data and then tries the BKG IGS archive mirror.
+- If `-e` is omitted, GPS tries NOAA/NGS and BKG RINEX 2 data; non-GPS profiles try three BKG mixed-RINEX daily products.
 - Auto-downloaded ephemeris cache files are ignored by git so local runs do not dirty the repository.
 - The full module map, data flow, threading model, FIFO behavior, downloader lifecycle, and extension points are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 

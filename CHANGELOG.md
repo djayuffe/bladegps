@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Regenerates non-GPS navigation-message cycles at every 30-second boundary,
+  preventing stale Galileo TOW and BeiDou SOW fields from repeating indefinitely.
+- Selects non-GPS ephemerides by full calendar week and epoch rather than wrapped
+  seconds-of-week alone, eliminating same-SOW selection of stale weekly records.
+- Replaces the fixed 4096-record mixed-RINEX buffer with validated two-pass dynamic
+  allocation and reports precise non-GPS producer initialization/render failures.
+- Reads BeiDou Klobuchar coefficients from RINEX 3 `BDSA`/`BDSB` and RINEX 4
+  `ION C ... D1D2` records, then validates and encodes the ICD-scaled coefficients.
+- Converts continuous RINEX Galileo weeks to the on-air GST week, fills I/NAV word
+  5 health/DVS and BGD fields from RINEX, and uses word type 63 dummy content when
+  optional service data is unavailable instead of broadcasting false typed zeros.
+- Derives GLONASS string-5 day and four-year-cycle fields from the record epoch,
+  marks unavailable almanac filler records non-operational, and rejects fractional
+  or out-of-range FDMA slots before carrier assignment.
+- Adds automatic non-GPS daily mixed-RINEX acquisition from three BKG/IGS
+  broadcast products with atomic cache writes and manual-file fallback.
+- Infers RINEX 3 navigation families for untagged mixed records from Galileo
+  data-source bits, BeiDou GEO PRNs, and GLONASS system identity so downloaded
+  RINEX 3 products reach the correct non-GPS backend instead of being rejected
+  as generic legacy records.
+- Aligns Galileo secondary-code and BeiDou D1 Neumann-Hoffman phases to the
+  requested scenario epoch and lowers the worst-case Galileo per-channel level
+  so a full 16-channel coherent CBOC sum cannot clip SC16 Q11 output.
+- Fails non-GPS initialization with a specific diagnostic when the selected
+  scenario epoch has no healthy, in-age record instead of silently streaming an
+  all-zero RF scenario forever.
+
 - Added the shared mixed-GNSS RF renderer with sample-continuous carrier, code,
   navigation-symbol and overlay-code phases, SC16 Q11 saturation, passband
   enforcement, and elevation-ranked healthy-satellite allocation.

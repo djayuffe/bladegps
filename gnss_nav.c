@@ -100,8 +100,13 @@ static int parse_orbit_line(const char *line, gnss_nav_record_t *record,
 
 static int valid_calendar(const gnss_calendar_time_t *time)
 {
-	return time->year >= 1980 && time->month >= 1 && time->month <= 12 &&
-		time->day >= 1 && time->day <= 31 && time->hour >= 0 && time->hour <= 23 &&
+	static const int month_days[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+	int days;
+	if(time->year<1980||time->month<1||time->month>12)return 0;
+	days=month_days[time->month-1];
+	if(time->month==2&&time->year%4==0&&
+		(time->year%100!=0||time->year%400==0))days++;
+	return time->day >= 1 && time->day <= days && time->hour >= 0 && time->hour <= 23 &&
 		time->minute >= 0 && time->minute <= 59 && isfinite(time->second) &&
 		time->second >= 0.0 && time->second < 61.0;
 }
@@ -119,6 +124,30 @@ static int supported_ephemeris(char system, const char *message)
 	if (system == 'R')
 		return strcmp(message, "FDMA") == 0;
 	return 0;
+}
+
+static int infer_rinex3_message(gnss_nav_record_t *record)
+{
+	long sources;
+	if(record==NULL)return -1;
+	switch(record->system) {
+	case GNSS_SYSTEM_GPS:
+		strcpy(record->message,"LNAV");return 0;
+	case GNSS_SYSTEM_GALILEO:
+		if(record->orbit_count<19U||!isfinite(record->orbit[17]))return -1;
+		sources=lround(record->orbit[17]);
+		if(fabs(record->orbit[17]-(double)sources)>1.0e-6||sources<0||sources>1023)
+			return -1;
+		if((sources&5L)!=0L)strcpy(record->message,"INAV");
+		else if((sources&2L)!=0L)strcpy(record->message,"FNAV");
+		else return -1;
+		return 0;
+	case GNSS_SYSTEM_BEIDOU:
+		strcpy(record->message,record->prn<=5U?"D2":"D1");return 0;
+	case GNSS_SYSTEM_GLONASS:
+		strcpy(record->message,"FDMA");return 0;
+	default:return -1;
+	}
 }
 
 static int skip_rinex4_record(FILE *stream)
@@ -142,7 +171,8 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	int header_done = 0;
 	size_t count = 0;
 
-	if (path == NULL || records == NULL || capacity == 0U || record_count == NULL)
+	if (path == NULL || record_count == NULL ||
+		((records == NULL) != (capacity == 0U)))
 		return -1;
 	*record_count = 0U;
 	stream = fopen(path, "r");
@@ -218,9 +248,13 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 				parse_orbit_line(line, &record, field_count) != 0)
 				goto fail;
 		}
-		if (count >= capacity)
+		if(!rinex4&&infer_rinex3_message(&record)!=0)
 			goto fail;
-		records[count++] = record;
+		if (count == SIZE_MAX || (records != NULL && count >= capacity))
+			goto fail;
+		if (records != NULL)
+			records[count] = record;
+		count++;
 	}
 	fclose(stream);
 	*record_count = count;
@@ -229,4 +263,97 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 fail:
 	fclose(stream);
 	return -1;
+}
+
+int gnss_load_rinex_nav(const char *path, gnss_nav_record_t **records,
+	size_t *record_count)
+{
+	gnss_nav_record_t *loaded;
+	size_t count;
+
+	if (path == NULL || records == NULL || record_count == NULL)
+		return -1;
+	*records = NULL;
+	*record_count = 0U;
+	if (gnss_read_rinex_nav(path, NULL, 0U, &count) != 0 ||
+		count > SIZE_MAX / sizeof(*loaded))
+		return -1;
+	loaded = malloc(count * sizeof(*loaded));
+	if (loaded == NULL)
+		return -1;
+	if (gnss_read_rinex_nav(path, loaded, count, record_count) != 0 ||
+		*record_count != count) {
+		free(loaded);
+		*record_count = 0U;
+		return -1;
+	}
+	*records = loaded;
+	return 0;
+}
+
+static int parse_four_values(const char *text, double values[4])
+{
+	char copy[NAV_LINE_SIZE];
+	char *cursor,*end;
+	unsigned int index;
+	if(text==NULL||values==NULL||strlen(text)>=sizeof(copy))return -1;
+	strcpy(copy,text);
+	for(cursor=copy;*cursor!='\0';cursor++)if(*cursor=='D'||*cursor=='d')*cursor='E';
+	cursor=copy;
+	for(index=0U;index<4U;index++) {
+		while(isspace((unsigned char)*cursor))cursor++;
+		values[index]=strtod(cursor,&end);
+		if(end==cursor||!isfinite(values[index]))return -1;
+		cursor=end;
+	}
+	return 0;
+}
+
+int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model)
+{
+	FILE *stream;
+	char line[NAV_LINE_SIZE];
+	double alpha[4],beta[4];
+	int have_alpha=0,have_beta=0,found=0;
+	if(path==NULL||model==NULL)return -1;
+	stream=fopen(path,"r");
+	if(stream==NULL)return -1;
+	while(fgets(line,sizeof(line),stream)!=NULL) {
+		if(strncmp(line,"BDSA",4U)==0) {
+			if(parse_four_values(line+4U,alpha)!=0)goto malformed;
+			have_alpha=1;
+		} else if(strncmp(line,"BDSB",4U)==0) {
+			if(parse_four_values(line+4U,beta)!=0)goto malformed;
+			have_beta=1;
+		} else if(line[0]=='>') {
+			char type[4]={0},satellite[4]={0},message[8]={0};
+			if(sscanf(line,"> %3s %3s %7s",type,satellite,message)==3&&
+				strcmp(type,"ION")==0&&satellite[0]=='C'&&
+				(strcmp(message,"D1D2")==0||strcmp(message,"D1")==0||
+				 strcmp(message,"D2")==0)) {
+				char second[NAV_LINE_SIZE],third[NAV_LINE_SIZE];
+				if(fgets(line,sizeof(line),stream)==NULL||
+					fgets(second,sizeof(second),stream)==NULL||
+					fgets(third,sizeof(third),stream)==NULL||
+					parse_field(line,23U,&alpha[0])!=0||
+					parse_field(line,42U,&alpha[1])!=0||
+					parse_field(line,61U,&alpha[2])!=0||
+					parse_field(second,4U,&alpha[3])!=0||
+					parse_field(second,23U,&beta[0])!=0||
+					parse_field(second,42U,&beta[1])!=0||
+					parse_field(second,61U,&beta[2])!=0||
+					parse_field(third,4U,&beta[3])!=0)goto malformed;
+				have_alpha=have_beta=1;
+			}
+		}
+		if(have_alpha&&have_beta) {
+			memcpy(model->alpha,alpha,sizeof(alpha));
+			memcpy(model->beta,beta,sizeof(beta));
+			found=1;have_alpha=have_beta=0;
+		}
+	}
+	if(ferror(stream))goto malformed;
+	fclose(stream);return found?0:1;
+malformed:
+	fclose(stream);return -1;
 }

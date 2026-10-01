@@ -1,5 +1,6 @@
 #include "gnss_schedule.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "gnss_beidou_nav.h"
@@ -7,11 +8,54 @@
 #include "gnss_glonass_nav.h"
 #include "gnss_rf.h"
 
+static int leap_year(int year)
+{
+	return year%4==0 && (year%100!=0 || year%400==0);
+}
+
+static int glonass_calendar_fields(const gnss_calendar_time_t *time,
+	uint16_t *day, uint8_t *cycle)
+{
+	static const unsigned int before_month[12]={0U,31U,59U,90U,120U,151U,
+		181U,212U,243U,273U,304U,334U};
+	int start,year,total;
+	if(time==NULL||day==NULL||cycle==NULL||time->year<1996||
+		time->month<1||time->month>12||time->day<1||time->day>31) return -1;
+	start=time->year;
+	while(!leap_year(start))start--;
+	total=(int)before_month[time->month-1]+time->day+
+		(time->month>2&&leap_year(time->year));
+	for(year=start;year<time->year;year++)total+=leap_year(year)?366:365;
+	if(total<1||total>1461||start<1996||(start-1996)%4!=0||
+		(start-1996)/4+1>31) return -1;
+	*day=(uint16_t)total;*cycle=(uint8_t)((start-1996)/4+1);return 0;
+}
+
 static void put_uint(uint8_t *bits, unsigned int value, unsigned int width)
 {
 	unsigned int index;
 	for(index=0U;index<width;index++)
 		bits[index]=(uint8_t)((value>>(width-index-1U))&1U);
+}
+
+static int galileo_word5_from_rinex(const gnss_nav_record_t *record,
+	galileo_inav_word5_t *fields)
+{
+	long health,bgd_a,bgd_b;
+	if(record==NULL||fields==NULL||record->system!=GNSS_SYSTEM_GALILEO||
+		record->orbit_count<24U||!isfinite(record->orbit[20])||
+		!isfinite(record->orbit[21])||!isfinite(record->orbit[22]))return -1;
+	health=lround(record->orbit[20]);
+	bgd_a=lround(ldexp(record->orbit[21],32));
+	bgd_b=lround(ldexp(record->orbit[22],32));
+	if(fabs(record->orbit[20]-(double)health)>1.0e-6||health<0||health>511||
+		bgd_a<-512||bgd_a>511||bgd_b<-512||bgd_b>511)return -1;
+	fields->bgd_e1e5a=(int16_t)bgd_a;fields->bgd_e1e5b=(int16_t)bgd_b;
+	fields->e1b_dvs=(uint8_t)(health&1L);
+	fields->e1b_health=(uint8_t)((health>>1)&3L);
+	fields->e5b_dvs=(uint8_t)((health>>6)&1L);
+	fields->e5b_health=(uint8_t)((health>>7)&3L);
+	return 0;
 }
 
 int gnss_schedule_galileo_e1(const gnss_nav_record_t *record,
@@ -31,8 +75,14 @@ int gnss_schedule_galileo_e1(const gnss_nav_record_t *record,
 		else if(type==5) {
 			galileo_inav_word5_t fields={0};
 			fields.week=(uint16_t)week; fields.tow=(tow+second)%604800U;
-			if(gnss_galileo_inav_word5(&fields,word)!=0) return -1;
-		} else put_uint(word,(unsigned int)type,6U);
+			if(galileo_word5_from_rinex(record,&fields)!=0||
+				gnss_galileo_inav_word5(&fields,word)!=0) return -1;
+		} else {
+			/* Optional service/almanac/FEC2 content is not present in an EPH
+			 * record. ICD dummy word type 63 is the safe on-air substitute;
+			 * labeling a zero body as the scheduled type creates false data. */
+			put_uint(word,type==0?0U:63U,6U);
+		}
 		if(gnss_galileo_inav_e1b_page(word,osnma,sar,0U,
 			gnss_galileo_inav_ssp_for_second(second%6U),even,odd,NULL)!=0 ||
 			gnss_rf_bits_to_symbols(even,sizeof(even),symbols+offset)!=0 ||
@@ -91,16 +141,21 @@ int gnss_schedule_glonass(const gnss_nav_record_t *record,
 	int8_t symbols[GLONASS_GNAV_FRAME_SYMBOLS])
 {
 	glonass_gnav_immediate_t immediate;
-	glonass_gnav_string5_t time_data={.na=1U,.n4=1U};
+	glonass_gnav_string5_t time_data={0};
 	glonass_gnav_almanac_t almanacs[5];
 	uint8_t frame[15][85],previous=0U;
 	unsigned int index;
 	if(record==NULL || symbols==NULL ||
 		gnss_glonass_gnav_from_rinex(record,&immediate)!=0) return -1;
+	if(glonass_calendar_fields(&record->toc,&time_data.na,&time_data.n4)!=0)
+		return -1;
 	memset(almanacs,0,sizeof(almanacs));
 	for(index=0U;index<5U;index++) {
 		almanacs[index].slot=(uint8_t)(index+1U);
-		almanacs[index].healthy=1U;
+		/* An FDMA ephemeris record does not contain constellation almanacs.
+		 * Cn=0 explicitly marks these structurally required filler pairs as
+		 * non-operational instead of advertising fabricated usable orbits. */
+		almanacs[index].healthy=0U;
 	}
 	if(gnss_glonass_gnav_frame(&immediate,&time_data,almanacs,frame)!=0) return -1;
 	for(index=0U;index<15U;index++)

@@ -2,7 +2,7 @@
 
 This document describes how bladeGPS is organized, how data moves through the simulator, and where to change specific behavior. It is intended for maintainers who need to audit, extend, port, or debug the project.
 
-bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with production backends for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF.
+bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with integrated software backends for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF. Hardware receiver certification is outside the automated test boundary.
 
 ## Source Layout
 
@@ -13,7 +13,7 @@ bladeGPS is a real-time multi-GNSS simulator framework for bladeRF with producti
 | `gnss.c` / `gnss.h` | Constellation and signal registry, RF/code profiles, profile parsing, capability status, and passband validation. |
 | `gnss_codes.c` / `gnss_codes.h` | ICD-derived BeiDou B1I and GLONASS L1OF ranging codes, GLONASS FDMA carrier mapping, and Galileo E1 memory-code decoding/CBOC primitives. |
 | `galileo_e1_codes.c` | All 50 E1-B and 50 E1-C primary memory codes from the Galileo OS SIS ICD v2.2 electronic Annex C. |
-| `gnss_nav.c` / `gnss_nav.h` | Typed mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA. |
+| `gnss_nav.c` / `gnss_nav.h` | Dynamically sized typed mixed RINEX 3/4 navigation records for GPS LNAV, Galileo INAV/FNAV, BeiDou D1/D2, and GLONASS FDMA, plus BeiDou Klobuchar metadata. |
 | `gnss_orbit.c` / `gnss_orbit.h` | Constellation-aware Keplerian, BeiDou GEO, clock/relativity, and GLONASS numerical propagation models. |
 | `gnss_geometry.c` / `gnss_geometry.h` | Iterative transmit-time observations, Earth-rotation correction, azimuth/elevation, satellite clock correction, range rate, Doppler, and pseudorange-derived initial code/carrier phases. |
 | `gnss_fec.c` / `gnss_fec.h` | Galileo CRC-24Q/convolutional/interleaving primitives and BeiDou BCH/interleaving primitives. |
@@ -90,8 +90,8 @@ unchanged carrier or spreading code.
 6. Allocate the bladeRF transfer buffer and internal FIFO.
 7. Open and configure the bladeRF device.
 8. Optionally configure XB200.
-9. Start the GPS producer thread.
-10. Wait for GPS initialization.
+9. Start the selected GPS or non-GPS producer thread.
+10. Wait for producer initialization.
 11. Configure and enable the bladeRF synchronous TX interface.
 12. Start the TX consumer thread.
 13. Join TX, disable TX, join GPS, free resources, and close the device.
@@ -107,16 +107,19 @@ When `-e` is omitted:
 1. The date comes from `-t YYYY/MM/DD,hh:mm:ss` if supplied.
 2. Otherwise, `utc_today()` uses the current UTC calendar date.
 3. `day_of_year()` maps the date to RINEX day-of-year.
-4. The target file name is `brdcDDD0.YYn`.
+4. GPS uses `brdcDDD0.YYn`; non-GPS profiles use the long-name mixed RINEX cache `BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx`.
 5. Existing local files are reused.
-6. Missing files are downloaded from NOAA/NGS CORS, with BKG IGS used as a fallback:
+6. GPS files come from NOAA/NGS CORS with BKG as fallback. Non-GPS files try three daily BKG mixed products:
 
 ```text
 https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00WRD_S_YYYYDDD0000_01D_MN.rnx.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDM00DLR_S_YYYYDDD0000_01D_MN.rnx.gz
 ```
 
-The downloader requires `curl` and `gzip`. It writes compressed and decompressed data to `.tmp` files first, verifies that those files exist, then renames them into place. On failure, temporary files are removed and the user is told to provide `-e <gps_nav>` manually.
+The downloader requires `curl` and `gzip`. It writes compressed and decompressed data to `.tmp` files first, verifies that those files exist, then renames them into place. On failure, temporary files are removed and the user is told to provide `-e <nav_file>` manually.
 
 Auto-downloaded files are ignored by git through `.gitignore` patterns, while existing tracked sample files remain tracked.
 

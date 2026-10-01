@@ -53,3 +53,7 @@ brdc[0-9][0-9][0-9]0.[0-9][0-9]n
 brdc[0-9][0-9][0-9]0.[0-9][0-9]n.gz
 brdc[0-9][0-9][0-9]0.[0-9][0-9]n.tmp
 brdc[0-9][0-9][0-9]0.[0-9][0-9]n.gz.tmp
+BRDC00IGS_R_[0-9]*_01D_MN.rnx
+BRDC00IGS_R_[0-9]*_01D_MN.rnx.gz
+BRDC00IGS_R_[0-9]*_01D_MN.rnx.tmp
+BRDC00IGS_R_[0-9]*_01D_MN.rnx.gz.tmp

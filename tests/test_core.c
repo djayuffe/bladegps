@@ -785,6 +785,9 @@ static void test_llh_motion(void)
 static void test_rinex4_mixed_navigation(void)
 {
 	gnss_nav_record_t records[4];
+	gnss_nav_record_t *allocated_records = NULL;
+	gnss_klobuchar_t ionosphere;
+	int8_t iono_alpha[4],iono_beta[4];
 	uint8_t galileo_words[4][GALILEO_INAV_WORD_BITS];
 	beidou_d1_ephemeris_t beidou_ephemeris;
 	uint8_t beidou_sf2[BEIDOU_NAV_SUBFRAME_BITS];
@@ -811,6 +814,16 @@ static void test_rinex4_mixed_navigation(void)
 
 	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", records, 4, &count) == 0);
 	assert(count == 3);
+	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", NULL, 0, &count) == 0);
+	assert(count == 3);
+	assert(gnss_load_rinex_nav("tests/rinex4_mixed.nav", &allocated_records, &count) == 0);
+	assert(count == 3 && allocated_records != NULL);
+	assert(allocated_records[2].system == GNSS_SYSTEM_GLONASS);
+	free(allocated_records);
+	assert(gnss_read_beidou_ionosphere("tests/rinex4_mixed.nav",&ionosphere)==0);
+	assert(gnss_beidou_ionosphere_quantize(&ionosphere,iono_alpha,iono_beta)==0);
+	assert(iono_alpha[0]==1&&iono_alpha[1]==-2&&iono_alpha[2]==3&&iono_alpha[3]==-4);
+	assert(iono_beta[0]==5&&iono_beta[1]==-6&&iono_beta[2]==7&&iono_beta[3]==-8);
 	assert(records[0].system == GNSS_SYSTEM_GALILEO && records[0].prn == 12);
 	assert(strcmp(records[0].message, "INAV") == 0);
 	assert(records[0].model == GNSS_NAV_KEPLERIAN && records[0].orbit_count == 24);
@@ -828,6 +841,11 @@ static void test_rinex4_mixed_navigation(void)
 	assert(unpack_bits(galileo_words[3],54,14) == 2920U);
 	assert(gnss_schedule_galileo_e1(&records[0],2300U,175200U,galileo_cycle)==0);
 	assert(galileo_cycle[0]==1 || galileo_cycle[0]==-1);
+	{
+		int8_t next_cycle[GALILEO_E1_CYCLE_SYMBOLS];
+		assert(gnss_schedule_galileo_e1(&records[0],2300U,175230U,next_cycle)==0);
+		assert(memcmp(galileo_cycle,next_cycle,sizeof(next_cycle))!=0);
+	}
 	llh2xyz(receiver_llh,receiver);
 	assert(gnss_observe(&records[0],records[0].orbit[8],receiver,receiver_velocity,
 		1575.42e6,1.023e6,GALILEO_E1_CODE_LENGTH,&observation)==0);
@@ -852,6 +870,12 @@ static void test_rinex4_mixed_navigation(void)
 	assert(gnss_schedule_beidou_d1(&records[1],zero_iono,zero_iono,93600U,
 		beidou_d1_cycle)==0);
 	assert(beidou_d1_cycle[0]==-1 && beidou_d1_cycle[1]==-1);
+	{
+		int8_t next_cycle[BEIDOU_D1_FRAME_SYMBOLS];
+		assert(gnss_schedule_beidou_d1(&records[1],zero_iono,zero_iono,93630U,
+			next_cycle)==0);
+		assert(memcmp(beidou_d1_cycle,next_cycle,sizeof(next_cycle))!=0);
+	}
 	assert(records[2].system == GNSS_SYSTEM_GLONASS && records[2].prn == 1);
 	assert(strcmp(records[2].message, "FDMA") == 0);
 	assert(records[2].model == GNSS_NAV_GLONASS_STATE_VECTOR && records[2].orbit_count == 16);
@@ -904,6 +928,11 @@ static void test_rinex4_mixed_navigation(void)
 	assert(radius > 2.0e7 && radius < 3.0e7);
 	assert(isfinite(clock_bias) && isfinite(clock_drift));
 	assert(gnss_read_rinex_nav("tests/rinex4_mixed.nav", records, 2, &count) == -1);
+	assert(gnss_read_rinex_nav("tests/rinex3_mixed.nav",records,4,&count)==0);
+	assert(count==3U);
+	assert(strcmp(records[0].message,"INAV")==0);
+	assert(strcmp(records[1].message,"D1")==0);
+	assert(strcmp(records[2].message,"FDMA")==0);
 }
 
 #ifndef _WIN32
@@ -955,6 +984,32 @@ static void test_non_gps_producer_block(void)
 	free(sim.fifo);
 }
 
+static void test_non_gps_rejects_stale_navigation(void)
+{
+	sim_t sim;
+	memset(&sim,0,sizeof(sim));
+	sim.opt.signal=GNSS_SIGNAL_GALILEO_E1;
+	strcpy(sim.opt.navfile,"tests/rinex4_mixed.nav");
+	sim.opt.staticLocationMode=1;sim.opt.llh[0]=59.3293/R2D;
+	sim.opt.llh[1]=18.0686/R2D;sim.opt.llh[2]=30.0;
+	sim.opt.g0.week=3000;sim.opt.g0.sec=0.0;sim.opt.iduration=1;
+	sim.opt.tx_frequency=1575420000U;sim.opt.tx_sample_rate=5000000U;
+	sim.iq_block_samples=1U;sim.fifo_length=2U;
+	sim.fifo=calloc(4U,sizeof(*sim.fifo));
+	assert(sim.fifo!=NULL);
+	assert(pthread_mutex_init(&sim.gps.lock,NULL)==0);
+	assert(pthread_cond_init(&sim.gps.initialization_done,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_read_ready,NULL)==0);
+	assert(pthread_cond_init(&sim.fifo_write_ready,NULL)==0);
+	assert(gnss_task(&sim)==NULL);
+	assert(sim.gps.ready==1&&sim.gps.error==-1&&sim.finished&&sim.head==0L);
+	pthread_cond_destroy(&sim.fifo_write_ready);
+	pthread_cond_destroy(&sim.fifo_read_ready);
+	pthread_cond_destroy(&sim.gps.initialization_done);
+	pthread_mutex_destroy(&sim.gps.lock);
+	free(sim.fifo);
+}
+
 int main(void)
 {
 	test_time_conversions();
@@ -980,6 +1035,7 @@ int main(void)
 	test_llh_motion();
 	test_rinex4_mixed_navigation();
 	test_non_gps_producer_block();
+	test_non_gps_rejects_stale_navigation();
 #ifndef _WIN32
 	test_compressed_rinex_sample();
 #endif

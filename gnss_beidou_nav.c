@@ -10,6 +10,26 @@
 static int quantize_signed(double value, int exponent, int32_t *result);
 static int quantize_unsigned(double value, int exponent, uint32_t *result);
 
+int gnss_beidou_ionosphere_quantize(const gnss_klobuchar_t *model,
+	int8_t alpha[4], int8_t beta[4])
+{
+	static const int alpha_exponents[4]={30,27,24,24};
+	static const int beta_exponents[4]={-11,-14,-16,-16};
+	unsigned int index;
+	if(model==NULL||alpha==NULL||beta==NULL)return -1;
+	for(index=0U;index<4U;index++) {
+		double a=ldexp(model->alpha[index],alpha_exponents[index]);
+		double b=ldexp(model->beta[index],beta_exponents[index]);
+		long qa,qb;
+		if(!isfinite(a)||!isfinite(b)||a<-128.0||a>127.0||b<-128.0||b>127.0)
+			return -1;
+		qa=lround(a);qb=lround(b);
+		if(fabs(a-(double)qa)>1.0e-6||fabs(b-(double)qb)>1.0e-6)return -1;
+		alpha[index]=(int8_t)qa;beta[index]=(int8_t)qb;
+	}
+	return 0;
+}
+
 static int valid_bits(const uint8_t *bits, size_t count)
 {
 	size_t index;

@@ -67,6 +67,8 @@ int gnss_beidou_d1_clock_subframe(const beidou_d1_clock_t *fields,
 	uint32_t frame_sow, uint8_t subframe1[BEIDOU_NAV_SUBFRAME_BITS]);
 int gnss_beidou_d1_clock_from_rinex(const gnss_nav_record_t *record,
 	const int8_t alpha[4], const int8_t beta[4], beidou_d1_clock_t *fields);
+int gnss_beidou_ionosphere_quantize(const gnss_klobuchar_t *model,
+	int8_t alpha[4], int8_t beta[4]);
 
 /* Build an almanac page using the common ICD payload used by D1 and D2.
  * D1 permits subframe 4 pages 1-24 and subframe 5 pages 1-6/11-23.

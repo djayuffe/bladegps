@@ -1,13 +1,14 @@
 # Multi-GNSS Architecture and Implementation Contract
 
-bladeGPS provides separate production paths for GPS L1 C/A, Galileo E1 OS,
+bladeGPS provides integrated software paths for GPS L1 C/A, Galileo E1 OS,
 BeiDou B1I, and GLONASS L1OF. This document records their implementation and
-validation boundaries.
+validation boundaries without implying receiver or RF-laboratory certification.
 
 ## Current capability
 
-All four profiles have production waveform backends. GPS can auto-download its
-legacy daily navigation file; the other profiles require `-e` with mixed RINEX 3/4.
+All four profiles have integrated waveform backends. GPS can auto-download its
+legacy daily navigation file; the other profiles auto-download or accept `-e`
+with mixed RINEX 3/4.
 
 | Layer | GPS L1 C/A | Galileo E1 OS | BeiDou B1I | GLONASS L1OF |
 | --- | --- | --- | --- | --- |
@@ -16,7 +17,7 @@ legacy daily navigation file; the other profiles require `-e` with mixed RINEX 3
 | Broadcast ephemeris parser | RINEX 2 production path; typed RINEX 3/4 LNAV reader added | Typed RINEX 3/4 INAV/FNAV reader added | Typed RINEX 3/4 D1/D2 reader added | Typed RINEX 3/4 FDMA reader added |
 | Orbit/clock model | Implemented | Integrated Kepler/clock/relativity, iterative transmit time, Sagnac, range rate and Doppler | Integrated MEO/IGSO/GEO orbit/clock, iterative transmit time, Sagnac, range rate and Doppler | Integrated RK4 state-vector/J2/Earth-rotation, iterative transmit time, range rate and Doppler |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
-| Navigation message | GPS LNAV | I/NAV ephemeris word types 1-4 and service word type 5, RINEX-to-ICD quantization, nominal E1-B vertical-page assembly, CRC-24Q, ICD-oriented convolutional coding, 30x8 interleaving, sync insertion, SSP selection, and nominal word scheduling implemented; almanac/FEC2 words remain | Complete D1 subframes 1-3, D2 GEO basic-navigation pages 1-10, and shared D1/D2 186-bit almanac pages are implemented with schedule validation, RINEX D1/D2 scaling, explicit ionosphere inputs, BCH/interleaving, preamble/FraID/SOW and rollover handling; D2 integrity, ionosphere-grid and time-offset service pages remain | Complete 15-string GNAV frames are assembled from RINEX-derived immediate strings 1-4, system-time string 5 and five almanac pairs with sign-magnitude fields, time mark and Hamming protection |
+| Navigation message | GPS LNAV | I/NAV ephemeris words 1-4 and word 5 with RINEX health/BGD, correct GST week/TOW, CRC-24Q, convolutional coding, interleaving, sync/SSP, and 30-second rescheduling; unavailable optional service/almanac/FEC2 slots use the ICD dummy word instead of false zero-valued content | D1 subframes 1-3, D2 GEO basic pages 1-10, RINEX 3/4 Klobuchar coefficients, BCH/interleaving, headers and rollover; library almanac builders are available, while service subframes not supplied by ephemeris/ION input are emitted as encoded reserved payloads | Immediate strings 1-4 and calendar-derived string 5, Hamming protection, relative/meander/time-mark symbols; almanac pairs absent from an FDMA ephemeris record are explicitly marked non-operational |
 | Modulation/mixer | Production BPSK(1) | Production E1-B/E1-C CBOC with continuous code/data/pilot-secondary/carrier phase | Production BPSK with D1 NH overlay and D2 500 bit/s scheduling | Production relative-code/meander/time-mark formatting and per-slot continuous-phase FDMA |
 | Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
 
@@ -26,9 +27,9 @@ The simulator is divided into layers that must remain constellation-aware:
 
 1. `gnss.c` owns immutable signal metadata: constellation, carrier plan, code rate, code length, minimum sample rate, occupied bandwidth, satellite limit, FDMA/CDMA behavior, and implementation status.
 2. The CLI selects a profile and obtains safe RF defaults. User overrides are checked to ensure the entire signal fits inside the complex sampled passband.
-3. A future navigation layer parses RINEX 3/4 mixed-system records into constellation-specific records. It must preserve each system's time scale rather than treating GST, BDT, GLONASS time, and GPS time as interchangeable.
-4. A future propagation layer evaluates the correct Keplerian or state-vector model, clock model, group delay, health, validity interval, and Earth-rotation correction for each system.
-5. Constellation navigation backends generate ranging codes and encoded navigation pages/strings. The remaining scheduler work is responsible for choosing the correct page at each constellation epoch.
+3. The navigation layer parses supported RINEX 3/4 mixed-system ephemeris records dynamically, skips unrelated record families without desynchronizing, and reads BeiDou Klobuchar data from RINEX 3 headers or RINEX 4 ION records.
+4. The propagation layer evaluates constellation-specific Keplerian, BeiDou GEO, or GLONASS state-vector models plus clocks, iterative transmit time, Earth rotation, range rate and Doppler.
+5. Constellation navigation backends generate ranging codes and encoded navigation pages/strings. The runtime rebuilds each 30-second cycle at its constellation epoch and substitutes explicitly unavailable service content safely.
 6. `gnss_rf.c` converts those streams to signal levels and combines only healthy, above-mask channels that fit the configured center frequency/sample rate. It preserves carrier, code, data, and overlay phase across arbitrary producer block boundaries.
 
 `gnss_schedule.c` assembles the transmitter-facing cycles: fifteen two-second
@@ -58,6 +59,11 @@ After selection, `gnss_rf_reconcile()` rebuilds the active channel bank while
 preserving carrier, code, data, and overlay phases for unchanged signals. This
 keeps mixed-constellation allocation stable when satellites rise, set, become
 unhealthy, or cross the configured elevation mask.
+
+The current CLI still chooses one profile with `-S`; it does not yet feed several
+profile producers into the allocator in one run. “Mixed” here describes the
+shared allocator/rendering capability and mixed-RINEX ingestion, not a user-facing
+simultaneous-constellation CLI mode.
 
 ## Band planning
 
@@ -93,16 +99,21 @@ The profile defaults are safe starting points, not proof that a particular SDR, 
 
 ## Ephemeris acquisition
 
-The implemented GPS downloader tries two daily RINEX 2 GPS sources in order:
+The GPS downloader tries two daily RINEX 2 GPS sources in order:
 
 1. NOAA/NGS CORS: `https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz`
 2. BKG IGS archive: `https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz`
 
-True multi-GNSS automatic acquisition requires a RINEX 3/4 mixed-navigation parser first. Suitable archive products include BKG/IGS `BRDC` mixed-system files. The downloader must not fetch those files and then pass them to the GPS-only RINEX 2 parser.
+For Galileo, BeiDou, and GLONASS, the downloader tries the BKG daily
+`BRDC00IGS_R`, `BRDC00WRD_S`, and `BRDM00DLR_S` mixed RINEX products in that
+order. The typed RINEX 3/4 parser then selects only records matching the chosen
+signal profile.
 
-## Acceptance gates
+## Validation gates
 
-A profile may be marked `implemented` only after all of these pass:
+The registry's `implemented` flag means that an executable software waveform
+path exists and passes the repository's automated checks. A profile must not be
+described as receiver-validated or RF-certified until all of these pass:
 
 - Parser tests using valid, truncated, malformed, unhealthy, expired, and week/day-boundary navigation records.
 - Published or independently generated ranging-code and navigation-message vectors.

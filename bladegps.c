@@ -208,7 +208,8 @@ static int utc_today(datetime_t *date)
 	return 0;
 }
 
-static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, size_t navfile_size)
+static int download_broadcast_ephemeris(const datetime_t *date,
+	gnss_signal_t signal, char *navfile, size_t navfile_size)
 {
 	int doy;
 	int yy;
@@ -216,9 +217,9 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	char gz_path[MAX_CHAR];
 	char tmp_gz_path[MAX_CHAR + 8];
 	char tmp_out_path[MAX_CHAR + 8];
-	char urls[2][256];
+	char urls[3][256];
 	char cmd[768];
-	size_t source;
+	size_t source,source_count;
 	int downloaded = 0;
 
 	doy = day_of_year(date);
@@ -226,28 +227,44 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 		return -1;
 
 	yy = date->y % 100;
-	if (snprintf(out_path, sizeof(out_path), "brdc%03d0.%02dn", doy, yy) >= (int)sizeof(out_path))
+	if (signal == GNSS_SIGNAL_GPS_L1CA) {
+		if (snprintf(out_path, sizeof(out_path), "brdc%03d0.%02dn", doy, yy) >= (int)sizeof(out_path))
+			return -1;
+	} else if (snprintf(out_path, sizeof(out_path),
+		"BRDC00IGS_R_%04d%03d0000_01D_MN.rnx", date->y, doy) >= (int)sizeof(out_path))
 		return -1;
 	if (snprintf(gz_path, sizeof(gz_path), "%s.gz", out_path) >= (int)sizeof(gz_path))
 		return -1;
 
 	if (file_exists(out_path)) {
 		printf("Using existing broadcast ephemeris: %s\n", out_path);
-		return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
+		return copy_option(navfile, navfile_size, out_path, "downloaded ephemeris path");
 	}
 	if (snprintf(tmp_gz_path, sizeof(tmp_gz_path), "%s.tmp", gz_path) >= (int)sizeof(tmp_gz_path))
 		return -1;
 	if (snprintf(tmp_out_path, sizeof(tmp_out_path), "%s.tmp", out_path) >= (int)sizeof(tmp_out_path))
 		return -1;
 
-	if (snprintf(urls[0], sizeof(urls[0]),
-		"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
-		date->y, doy, doy, yy) >= (int)sizeof(urls[0]))
-		return -1;
-	if (snprintf(urls[1], sizeof(urls[1]),
-		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/brdc%03d0.%02dn.gz",
-		date->y, doy, doy, yy) >= (int)sizeof(urls[1]))
-		return -1;
+	if (signal == GNSS_SIGNAL_GPS_L1CA) {
+		if (snprintf(urls[0], sizeof(urls[0]),
+			"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
+			date->y, doy, doy, yy) >= (int)sizeof(urls[0]) ||
+			snprintf(urls[1], sizeof(urls[1]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/brdc%03d0.%02dn.gz",
+			date->y, doy, doy, yy) >= (int)sizeof(urls[1])) return -1;
+		source_count=2U;
+	} else {
+		if (snprintf(urls[0], sizeof(urls[0]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00IGS_R_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy) >= (int)sizeof(urls[0]) ||
+			snprintf(urls[1], sizeof(urls[1]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy) >= (int)sizeof(urls[1]) ||
+			snprintf(urls[2], sizeof(urls[2]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDM00DLR_S_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy) >= (int)sizeof(urls[2])) return -1;
+		source_count=3U;
+	}
 
 	remove(tmp_gz_path);
 	remove(tmp_out_path);
@@ -262,9 +279,9 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	if (run_command(cmd, "find gzip in PATH") != 0)
 		return -1;
 
-	for (source = 0; source < sizeof(urls) / sizeof(urls[0]); source++) {
+	for (source = 0; source < source_count; source++) {
 		printf("Downloading broadcast ephemeris from source %zu/%zu: %s\n",
-			source + 1, sizeof(urls) / sizeof(urls[0]), urls[source]);
+			source + 1,source_count,urls[source]);
 		remove(tmp_gz_path);
 		if (snprintf(cmd, sizeof(cmd),
 			"curl -fL --retry 2 --connect-timeout 15 -o \"%s\" \"%s\"",
@@ -308,7 +325,7 @@ static int download_broadcast_ephemeris(const datetime_t *date, char *navfile, s
 	}
 
 	printf("Saved broadcast ephemeris: %s\n", out_path);
-	return copy_option(navfile, navfile_size, out_path, "downloaded GPS ephemeris path");
+	return copy_option(navfile, navfile_size, out_path, "downloaded ephemeris path");
 
 fail:
 	remove(tmp_gz_path);
@@ -493,7 +510,7 @@ void usage(void)
 {
 	printf("Usage: bladegps [options]\n"
 		"Options:\n"
-		"  -e <nav_file>    RINEX navigation file (GPS auto-downloads if omitted)\n"
+		"  -e <nav_file>    RINEX navigation file (daily broadcast data auto-downloads if omitted)\n"
 		"  -u <user_motion> User motion file (dynamic mode)\n"
 		"  -p <llh_motion>  Geodetic CSV motion: time,latitude,longitude,height\n"
 		"  -g <nmea_gga>    NMEA GGA stream (dynamic mode)\n"
@@ -576,7 +593,7 @@ int main(int argc, char *argv[])
 		switch (result)
 		{
 		case 'e':
-			if (copy_option(s.opt.navfile, sizeof(s.opt.navfile), optarg, "GPS ephemeris path") != 0)
+			if (copy_option(s.opt.navfile, sizeof(s.opt.navfile), optarg, "ephemeris path") != 0)
 				exit(1);
 			break;
 		case 'u':
@@ -723,10 +740,6 @@ int main(int argc, char *argv[])
 			signal_profile != NULL ? signal_profile->name : "selected signal");
 		return 1;
 	}
-	if (s.opt.signal != GNSS_SIGNAL_GPS_L1CA && s.opt.navfile[0] == 0) {
-		fprintf(stderr,"ERROR: Non-GPS profiles require a mixed RINEX 3/4 navigation file through -e.\n");
-		return 1;
-	}
 	if (!gnss_frequency_fits((double)s.opt.tx_frequency, (double)s.opt.tx_sample_rate,
 		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz)) {
 		fprintf(stderr, "ERROR: Selected sample rate/center frequency does not contain the %s signal.\n",
@@ -737,11 +750,12 @@ int main(int argc, char *argv[])
 
 	if (s.opt.navfile[0]==0) {
 		if (!navdate_set && utc_today(&navdate) != 0) {
-			printf("ERROR: GPS ephemeris file is not specified and current UTC date is unavailable.\n");
+			printf("ERROR: Navigation file is not specified and current UTC date is unavailable.\n");
 			exit(1);
 		}
-		if (download_broadcast_ephemeris(&navdate, s.opt.navfile, sizeof(s.opt.navfile)) != 0) {
-			printf("ERROR: Failed to auto-download GPS broadcast ephemeris. Use -e <gps_nav> to provide one manually.\n");
+		if (download_broadcast_ephemeris(&navdate,s.opt.signal,
+			s.opt.navfile,sizeof(s.opt.navfile)) != 0) {
+			printf("ERROR: Failed to auto-download broadcast ephemeris. Use -e <nav_file> to provide one manually.\n");
 			exit(1);
 		}
 	}
