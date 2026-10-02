@@ -16,6 +16,20 @@ static double axis_value(Sint16 raw)
 }
 #endif
 
+int motion_keyboard_update(int requested, int *active, double *speed,
+	double increment, double maximum)
+{
+	if(requested<0||active==NULL||speed==NULL||!isfinite(*speed)||
+		!isfinite(increment)||increment<=0.0||!isfinite(maximum)||maximum<=0.0||
+		increment>maximum||*active<0||*speed<0.0||*speed>maximum)return -1;
+	if(requested!=0) {
+		if(*active!=requested){*active=requested;*speed=increment;}
+		else {*speed+=increment;if(*speed>maximum)*speed=maximum;}
+	} else if(*speed>increment) *speed-=increment;
+	else {*speed=0.0;*active=0;}
+	return 0;
+}
+
 int motion_controller_open(motion_controller_t *controller, int index)
 {
 	if(controller==NULL||index<0)return -1;

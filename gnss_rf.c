@@ -42,7 +42,8 @@ int gnss_rf_validate_channel(const gnss_rf_channel_t *c, double center,
 	if(c->modulation==GNSS_RF_GALILEO_E1 &&
 		(!symbols_valid(c->pilot_code,c->code_length) || c->system!=GNSS_SYSTEM_GALILEO))
 		return -1;
-	bandwidth=c->modulation==GNSS_RF_GALILEO_E1?4.0e6:2.2*c->code_rate_hz;
+	bandwidth=c->modulation==GNSS_RF_GALILEO_E1?
+		GNSS_GALILEO_E1_REFERENCE_BANDWIDTH_HZ:2.2*c->code_rate_hz;
 	return gnss_frequency_fits(center,sample_rate,c->carrier_hz+c->doppler_hz,bandwidth)?0:-1;
 }
 
@@ -156,9 +157,8 @@ static int same_signal(const gnss_rf_channel_t *a, const gnss_rf_channel_t *b)
 	return a->enabled && b->enabled && a->system==b->system && a->prn==b->prn &&
 		a->modulation==b->modulation && a->carrier_hz==b->carrier_hz &&
 		a->code_length==b->code_length &&
-		a->data_symbol_count==b->data_symbol_count && a->data_rate_hz==b->data_rate_hz &&
-		a->overlay_symbol_count==b->overlay_symbol_count &&
-		a->overlay_rate_hz==b->overlay_rate_hz;
+		a->data_symbol_count==b->data_symbol_count &&
+		a->overlay_symbol_count==b->overlay_symbol_count;
 }
 
 int gnss_rf_reconcile(gnss_rf_channel_t *active, size_t capacity,

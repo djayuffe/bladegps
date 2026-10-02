@@ -155,6 +155,8 @@ static void test_signal_profiles(void)
 	assert(profile != NULL && profile->waveform_implemented == 1);
 	assert(gnss_signal_parse("galileo-e1", &signal) == 0);
 	assert(gnss_signal_profile(signal)->system == GNSS_SYSTEM_GALILEO);
+	assert(gnss_signal_profile(signal)->minimum_sample_rate_hz==
+		GNSS_GALILEO_E1_SAMPLE_RATE_HZ);
 	assert(gnss_signal_parse("mixed-open",&signal)==0);
 	assert(signal==GNSS_SIGNAL_MIXED_OPEN&&gnss_signal_profile(signal)->minimum_sample_rate_hz==48.0e6);
 	assert(gnss_signal_parse("invalid", &signal) == -1);
@@ -277,8 +279,36 @@ static void test_rf_renderer_and_allocator(void)
 	assert(gnss_rf_reconcile(bank,2U,desired,2U)==0);
 	assert(bank[1].carrier_phase==1.25 && bank[1].code_phase==2.5 &&
 		bank[1].data_phase==1.5 && bank[1].overlay_phase==0.5);
+	desired[0]=bank[0];desired[1]=bank[1];
+	desired[1].doppler_hz+=25.0;desired[1].code_rate_hz+=0.1;
+	desired[1].data_rate_hz+=0.01;desired[1].overlay_rate_hz+=0.02;
+	desired[1].carrier_phase=0.1;desired[1].code_phase=0.1;
+	desired[1].data_phase=0.1;desired[1].overlay_phase=0.1;
+	assert(gnss_rf_reconcile(bank,2U,desired,2U)==0);
+	assert(bank[1].carrier_phase==1.25 && bank[1].code_phase==2.5 &&
+		bank[1].data_phase==1.5 && bank[1].overlay_phase==0.5);
+	assert(bank[1].doppler_hz==desired[1].doppler_hz &&
+		bank[1].code_rate_hz==desired[1].code_rate_hz &&
+		bank[1].data_rate_hz==desired[1].data_rate_hz &&
+		bank[1].overlay_rate_hz==desired[1].overlay_rate_hz);
 	desired[1]=desired[0];
 	assert(gnss_rf_reconcile(bank,2U,desired,2U)==-1);
+}
+
+static void test_keyboard_motion_state(void)
+{
+	int direction=UNDEF;
+	double speed=0.0;
+	assert(motion_keyboard_update(NORTH,&direction,&speed,0.1,1.4)==0);
+	assert(direction==NORTH&&fabs(speed-0.1)<1.0e-12);
+	assert(motion_keyboard_update(NORTH,&direction,&speed,0.1,1.4)==0);
+	assert(direction==NORTH&&fabs(speed-0.2)<1.0e-12);
+	assert(motion_keyboard_update(EAST,&direction,&speed,0.1,1.4)==0);
+	assert(direction==EAST&&fabs(speed-0.1)<1.0e-12);
+	assert(motion_keyboard_update(UNDEF,&direction,&speed,0.1,1.4)==0);
+	assert(direction==UNDEF&&speed==0.0);
+	assert(motion_keyboard_update(NORTH,&direction,&speed,0.0,1.4)==-1);
+	assert(motion_keyboard_update(NORTH,&direction,&speed,2.0,1.4)==-1);
 }
 
 static void test_constellation_rf_sequences(void)
@@ -310,7 +340,8 @@ static void test_constellation_rf_sequences(void)
 	channel.data_rate_hz=250.0; channel.overlay_symbols=galileo_secondary;
 	channel.overlay_symbol_count=GALILEO_E1C_SECONDARY_LENGTH;
 	channel.overlay_rate_hz=250.0;
-	assert(gnss_rf_render(&channel,1U,1575.42e6,5.0e6,iq,128U)==0);
+	assert(gnss_rf_render(&channel,1U,1575.42e6,
+		GNSS_GALILEO_E1_SAMPLE_RATE_HZ,iq,128U)==0);
 	{
 		double alpha=sqrt(10.0/11.0),beta=sqrt(1.0/11.0);
 		double expected=500.0*(galileo_b[0]*(alpha+beta)-
@@ -326,7 +357,8 @@ static void test_constellation_rf_sequences(void)
 			bank[index].data_phase=0.0;bank[index].overlay_phase=0.0;
 			bank[index].carrier_phase=0.0;
 		}
-		assert(gnss_rf_render(bank,16U,1575.42e6,5.0e6,iq,128U)==0);
+		assert(gnss_rf_render(bank,16U,1575.42e6,
+			GNSS_GALILEO_E1_SAMPLE_RATE_HZ,iq,128U)==0);
 		for(index=0U;index<256U;index++) {
 			unsigned int magnitude=(unsigned int)(iq[index]<0?-(int)iq[index]:iq[index]);
 			if(magnitude>peak)peak=magnitude;
@@ -921,6 +953,22 @@ static void test_timed_motion_resampling(void)
 	assert(fabs(rows[1][0]-1.0)<1.0e-12);
 	assert(fabs(rows[1][1]-2.0)<1.0e-12);
 	assert(fabs(rows[2][2]-6.0)<1.0e-12);
+	assert(readUserMotion(rows,"tests/invalid_motion.csv")==-2);
+	assert(readLlhMotion(rows,"tests/invalid_motion.csv")==-2);
+}
+
+static void test_nmea_motion_validation(void)
+{
+	double storage[6][3]={{0}};
+	double *rows[6]={storage[0],storage[1],storage[2],storage[3],storage[4],storage[5]};
+	double llh[3];
+	assert(readNmeaGGA(rows,"tests/nmea_motion.gga")==5);
+	xyz2llh(rows[0],llh);
+	assert(fabs(llh[0]*R2D-(59.0+20.0/60.0))<1.0e-7);
+	assert(fabs(llh[1]*R2D-(18.0+4.0/60.0))<1.0e-7);
+	assert(fabs(llh[2]-50.0)<1.0e-3);
+	assert(rows[1][0]!=rows[0][0]&&rows[2][0]!=rows[1][0]&&
+		rows[3][0]!=rows[2][0]&&rows[4][0]!=rows[3][0]);
 }
 
 static void test_rinex4_mixed_navigation(void)
@@ -1173,8 +1221,11 @@ static void test_non_gps_producer_block(void)
 	sim.opt.staticLocationMode=1; sim.opt.llh[0]=59.3293/R2D;
 	sim.opt.llh[1]=18.0686/R2D; sim.opt.llh[2]=30.0;
 	sim.opt.g0.week=-1; sim.opt.iduration=1; sim.opt.elevation_mask=-90.0;
-	sim.opt.tx_frequency=1575420000U; sim.opt.tx_sample_rate=5000000U;
-	sim.iq_block_samples=500000U; sim.fifo_length=1000000U;
+	sim.opt.tx_frequency=1575420000U;
+	sim.opt.tx_sample_rate=(unsigned int)GNSS_GALILEO_E1_SAMPLE_RATE_HZ;
+	/* A shorter block keeps this integration test fast; production derives a
+	 * complete 100 ms block from the same profile sample rate. */
+	sim.iq_block_samples=368280U; sim.fifo_length=736560U;
 	sim.fifo=calloc(sim.fifo_length*2U,sizeof(*sim.fifo));
 	assert(sim.fifo!=NULL);
 	assert(pthread_mutex_init(&sim.gps.lock,NULL)==0);
@@ -1272,6 +1323,7 @@ int main(void)
 	test_independent_receiver_loopback();
 	test_bladerf_hardware_helpers();
 	test_rf_renderer_and_allocator();
+	test_keyboard_motion_state();
 	test_constellation_rf_sequences();
 	test_multi_gnss_codes();
 	test_multi_gnss_fec();
@@ -1288,6 +1340,7 @@ int main(void)
 	test_glonass_frame();
 	test_llh_motion();
 	test_timed_motion_resampling();
+	test_nmea_motion_validation();
 	test_rinex4_mixed_navigation();
 #ifndef _WIN32
 	test_nonseekable_rinex4_navigation();

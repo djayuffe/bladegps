@@ -285,7 +285,8 @@ For each 100 ms block:
    at most sixteen healthy satellites in descending elevation order.
 2. A desired channel bank is created with carrier, code, data, pilot/overlay,
    Doppler, amplitude, and initial phase state.
-3. `gnss_rf_reconcile()` preserves every live phase for unchanged channels.
+3. `gnss_rf_reconcile()` preserves every live phase for unchanged channel
+   identities while applying their newly observed Doppler and clock rates.
 4. `gnss_rf_render()` generates BPSK or Galileo E1 CBOC samples and sums all
    channels into interleaved SC16 Q11.
 5. The complete block is written to the FIFO for the TX consumer.

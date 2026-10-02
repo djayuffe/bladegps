@@ -64,6 +64,13 @@ the overlay; D2 omits the NH overlay and uses its 500 bit/s stream directly.
 GLONASS GNAV strings are differentially encoded, modulo-2 combined with the
 100 Hz auxiliary meander for 1.7 seconds, and followed by the 30-chip time mark.
 
+The standalone Galileo E1 profile uses the ICD 24.552 MHz receiver reference
+bandwidth as its analog bandwidth and a 36.828 Msps complex sample rate. This
+provides 36 samples per 1.023 Mcps code chip—three samples for each of the
+twelve CBOC subchips—while retaining digital passband margin for Doppler. It
+avoids aliasing the 6.138 MHz BOC(6,1) component into the old 4.092 Msps
+approximation.
+
 The allocator is constellation-neutral. It rejects invalid systems, unhealthy
 satellites, elevations below the mask, and signals whose occupied bandwidth does
 not fit the complex sampled passband. Survivors are selected deterministically in

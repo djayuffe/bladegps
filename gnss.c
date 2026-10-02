@@ -13,7 +13,8 @@ static const gnss_signal_profile_t signal_profiles[GNSS_SIGNAL_COUNT] = {
 	{
 		GNSS_SIGNAL_GALILEO_E1, GNSS_SYSTEM_GALILEO, "galileo-e1",
 		"Galileo E1-B/C Open Service with I/NAV", 1575.42e6, 1.023e6, 4092,
-		4.092e6, 4.0e6, 36, 0, 1
+		GNSS_GALILEO_E1_SAMPLE_RATE_HZ,
+		GNSS_GALILEO_E1_REFERENCE_BANDWIDTH_HZ, 36, 0, 1
 	},
 	{
 		GNSS_SIGNAL_BEIDOU_B1I, GNSS_SYSTEM_BEIDOU, "beidou-b1i",

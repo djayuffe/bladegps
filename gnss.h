@@ -4,6 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Galileo OS SIS ICD v2.2 Table 3 reference bandwidth. The production sample
+ * rate provides 36 samples per E1 code chip (three per CBOC subchip) and leaves
+ * digital passband margin for satellite Doppler. */
+#define GNSS_GALILEO_E1_REFERENCE_BANDWIDTH_HZ 24552000.0
+#define GNSS_GALILEO_E1_SAMPLE_RATE_HZ 36828000.0
+
 typedef enum {
 	GNSS_SYSTEM_GPS = 0,
 	GNSS_SYSTEM_GALILEO,

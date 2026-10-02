@@ -5,6 +5,8 @@
 #include <string.h>
 #include <math.h>
 #include <errno.h>
+#include <ctype.h>
+#include <limits.h>
 
 #include <time.h>
 #ifdef _WIN32
@@ -1384,6 +1386,27 @@ static int append_motion_segment(double **xyz,int *count,double output_time,
 	return 0;
 }
 
+static int parse_motion_csv4(const char *line,double values[4])
+{
+	const char *cursor=line;
+	char *end;
+	unsigned int field;
+	if(line==NULL||values==NULL)return -1;
+	for(field=0U;field<4U;field++) {
+		errno=0;values[field]=strtod(cursor,&end);
+		if(errno!=0||end==cursor||!isfinite(values[field]))return -1;
+		while(*end==' '||*end=='\t')end++;
+		if(field<3U) {
+			if(*end!=',')return -1;
+			cursor=end+1;
+		} else {
+			while(isspace((unsigned char)*end))end++;
+			if(*end!='\0')return -1;
+		}
+	}
+	return 0;
+}
+
 //int readUserMotion(double xyz[USER_MOTION_SIZE][3], const char *filename)
 int readUserMotion(double **xyz, const char *filename)
 {
@@ -1397,14 +1420,15 @@ int readUserMotion(double **xyz, const char *filename)
 
 	while(numd<USER_MOTION_SIZE)
 	{
+		double fields[4];
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
 
-		if (sscanf(str, "%lf,%lf,%lf,%lf", &t, &x, &y, &z) != 4 ||
-			!isfinite(t) || !isfinite(x) || !isfinite(y) || !isfinite(z)) {
+		if ((strchr(str,'\n')==NULL&&!feof(fp))||parse_motion_csv4(str,fields)!=0) {
 			fclose(fp);
 			return -2;
 		}
+		t=fields[0];x=fields[1];y=fields[2];z=fields[3];
 
 		if(!have_previous) {
 			start_time=previous_time=t;previous[0]=xyz[0][0]=x;
@@ -1436,12 +1460,15 @@ int readLlhMotion(double **xyz, const char *filename)
 		return -1;
 
 	while(numd<USER_MOTION_SIZE) {
+		double fields[4];
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
-		if (sscanf(str, "%lf,%lf,%lf,%lf", &time_seconds, &latitude,
-			&longitude, &height) != 4 || !isfinite(time_seconds) ||
-			!isfinite(latitude) || !isfinite(longitude) || !isfinite(height) ||
-			latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+		if ((strchr(str,'\n')==NULL&&!feof(fp))||parse_motion_csv4(str,fields)!=0) {
+			fclose(fp);return -2;
+		}
+		time_seconds=fields[0];latitude=fields[1];longitude=fields[2];height=fields[3];
+		if (latitude < -90.0 || latitude > 90.0 ||
+			longitude < -180.0 || longitude > 180.0) {
 			fclose(fp);
 			return -2;
 		}
@@ -1464,11 +1491,15 @@ int readLlhMotion(double **xyz, const char *filename)
 static int nmea_checksum_valid(const char *sentence)
 {
 	const char *star;
+	const char *tail;
 	unsigned int expected,value=0U;
 	if(sentence==NULL||sentence[0]!='$')return 0;
 	star=strchr(sentence,'*');
 	if(star==NULL)return 1;
+	if(star[1]=='\0'||star[2]=='\0')return 0;
+	if(!isxdigit((unsigned char)star[1])||!isxdigit((unsigned char)star[2]))return 0;
 	if(sscanf(star+1,"%2x",&expected)!=1)return 0;
+	for(tail=star+3;*tail!='\0';tail++)if(!isspace((unsigned char)*tail))return 0;
 	for(sentence++;sentence<star;sentence++)value^=(unsigned char)*sentence;
 	return value==expected;
 }
@@ -1480,9 +1511,56 @@ static int nmea_time_seconds(const char *text,double *seconds)
 	char *end;
 	if(text==NULL||seconds==NULL)return -1;
 	raw=strtod(text,&end);if(end==text||!isfinite(raw))return -1;
+	while(isspace((unsigned char)*end))end++;
+	if(*end!='\0')return -1;
 	hour=(int)(raw/10000.0);minute=(int)(raw/100.0)%100;sec=fmod(raw,100.0);
 	if(hour<0||hour>23||minute<0||minute>59||sec<0.0||sec>=61.0)return -1;
 	*seconds=(double)hour*3600.0+(double)minute*60.0+sec;return 0;
+}
+
+static int nmea_decimal(const char *text,double *value)
+{
+	char *end;
+	if(text==NULL||value==NULL||*text=='\0')return -1;
+	*value=strtod(text,&end);
+	if(end==text||!isfinite(*value))return -1;
+	while(isspace((unsigned char)*end))end++;
+	return *end=='\0'?0:-1;
+}
+
+static int nmea_coordinate(const char *text,const char *hemisphere,
+	int maximum_degrees,double *radians)
+{
+	double raw,degrees,minutes,value;
+	char positive,negative;
+	if(nmea_decimal(text,&raw)!=0||raw<0.0||hemisphere==NULL||
+		hemisphere[0]=='\0'||hemisphere[1]!='\0'||radians==NULL)return -1;
+	positive=maximum_degrees==90?'N':'E';negative=maximum_degrees==90?'S':'W';
+	if(hemisphere[0]!=positive&&hemisphere[0]!=negative)return -1;
+	degrees=floor(raw/100.0);minutes=raw-degrees*100.0;
+	if(degrees<0.0||degrees>(double)maximum_degrees||minutes<0.0||minutes>=60.0||
+		(degrees==(double)maximum_degrees&&minutes>0.0))return -1;
+	value=degrees+minutes/60.0;
+	if(hemisphere[0]==negative)value=-value;
+	*radians=value/R2D;return 0;
+}
+
+static int nmea_integer(const char *text,int *value)
+{
+	char *end;long parsed;
+	if(text==NULL||value==NULL||*text=='\0')return -1;
+	parsed=strtol(text,&end,10);
+	while(isspace((unsigned char)*end))end++;
+	if(end==text||*end!='\0'||parsed<INT_MIN||parsed>INT_MAX)return -1;
+	*value=(int)parsed;return 0;
+}
+
+static int nmea_metre_unit(const char *text)
+{
+	if(text==NULL||*text!='M')return 0;
+	text++;
+	while(isspace((unsigned char)*text))text++;
+	return *text=='\0';
 }
 
 //int readNmeaGGA(double xyz[USER_MOTION_SIZE][3], const char *filename)
@@ -1493,9 +1571,8 @@ int readNmeaGGA(double **xyz, const char *filename)
 	char str[MAX_CHAR];
 	char *token;
 	double llh[3],pos[3];
-	char tmp[8];
 	int fix_quality;
-	double timestamp,start_time=0.0,previous_time=0.0,previous[3]={0};
+	double timestamp,start_time=0.0,previous_time=0.0,day_offset=0.0,previous[3]={0};
 	int have_previous=0;
 
 	if (NULL==(fp=fopen(filename,"rt")))
@@ -1506,6 +1583,10 @@ int readNmeaGGA(double **xyz, const char *filename)
 		if (fgets(str, MAX_CHAR, fp)==NULL)
 			break;
 		if(!nmea_checksum_valid(str))continue;
+		{
+			char *checksum=strchr(str,'*');
+			if(checksum!=NULL)*checksum='\0';
+		}
 
 		token = strtok(str, ",");
 		if (token == NULL || strlen(token) < 6)
@@ -1518,42 +1599,25 @@ int readNmeaGGA(double **xyz, const char *filename)
 				continue;
 			
 			token = strtok(NULL, ","); // Latitude
-			if (token == NULL || strlen(token) < 4)
-				continue;
-			strncpy(tmp, token, 2);
-			tmp[2] = 0;
-			
-			llh[0] = atof(tmp) + atof(token+2)/60.0;
-
-			token = strtok(NULL, ","); // North or south
-			if (token == NULL || token[0] == '\0')
-				continue;
-			if (token[0]=='S')
-				llh[0] *= -1.0;
-
-			llh[0] /= R2D; // in radian
-			
-			token = strtok(NULL, ","); // Longitude
-			if (token == NULL || strlen(token) < 5)
-				continue;
-			strncpy(tmp, token, 3);
-			tmp[3] = 0;
-			
-			llh[1] = atof(tmp) + atof(token+3)/60.0;
-
-			token = strtok(NULL, ","); // East or west
-			if (token == NULL || token[0] == '\0')
-				continue;
-			if (token[0]=='W')
-				llh[1] *= -1.0;
-
-			llh[1] /= R2D; // in radian
-
-			token = strtok(NULL, ","); // GPS fix
 			if (token == NULL)
 				continue;
-			fix_quality = atoi(token);
-			if (fix_quality <= 0)
+			{
+				char *latitude=token;
+				token = strtok(NULL, ","); // North or south
+				if(nmea_coordinate(latitude,token,90,&llh[0])!=0)continue;
+			}
+			
+			token = strtok(NULL, ","); // Longitude
+			if (token == NULL)
+				continue;
+			{
+				char *longitude=token;
+				token = strtok(NULL, ","); // East or west
+				if(nmea_coordinate(longitude,token,180,&llh[1])!=0)continue;
+			}
+
+			token = strtok(NULL, ","); // GPS fix
+			if (nmea_integer(token,&fix_quality)!=0 || fix_quality <= 0)
 				continue;
 			token = strtok(NULL, ","); // Number of satellites
 			if (token == NULL)
@@ -1563,20 +1627,21 @@ int readNmeaGGA(double **xyz, const char *filename)
 				continue;
 
 			token = strtok(NULL, ","); // Altitude above meas sea level
-			if (token == NULL || token[0] == '\0')
+			if (nmea_decimal(token,&llh[2])!=0)
 				continue;
-			
-			llh[2] = atof(token);
 
 			token = strtok(NULL, ","); // in meter
-			if (token == NULL)
+			if (!nmea_metre_unit(token))
 				continue;
 
 			token = strtok(NULL, ","); // Geoid height above WGS84 ellipsoid
-			if (token == NULL || token[0] == '\0')
-				continue;
-			
-			llh[2] += atof(token);
+			{
+				double geoid;
+				if(nmea_decimal(token,&geoid)!=0)continue;
+				llh[2]+=geoid;
+			}
+			token=strtok(NULL,",");
+			if(!nmea_metre_unit(token))continue;
 			if (!isfinite(llh[0]) || !isfinite(llh[1]) || !isfinite(llh[2]) ||
 				fabs(llh[0]) > PI/2.0 || fabs(llh[1]) > PI)
 				continue;
@@ -1584,7 +1649,10 @@ int readNmeaGGA(double **xyz, const char *filename)
 			// Convert geodetic position into ECEF coordinates
 			llh2xyz(llh, pos);
 
-			if(have_previous&&timestamp<previous_time-43200.0)timestamp+=86400.0;
+			if(have_previous) {
+				while(timestamp+day_offset<previous_time-43200.0)day_offset+=86400.0;
+				timestamp+=day_offset;
+			}
 			if(!have_previous){start_time=previous_time=timestamp;
 				memcpy(previous,pos,sizeof(previous));memcpy(xyz[0],pos,sizeof(pos));
 				numd=1;have_previous=1;}

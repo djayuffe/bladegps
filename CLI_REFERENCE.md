@@ -49,7 +49,7 @@ can add live movement to that base position.
 | Profile | Center frequency | Sample rate | Analog bandwidth | Maximum advertised SV number | FDMA |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `gps-l1ca` | 1,575,420,000 Hz | 2,600,000 sps | 2,500,000 Hz | 37 | No |
-| `galileo-e1` | 1,575,420,000 Hz | 4,092,000 sps | 4,000,000 Hz | 36 | No |
+| `galileo-e1` | 1,575,420,000 Hz | 36,828,000 sps | 24,552,000 Hz | 36 | No |
 | `beidou-b1i` | 1,561,098,000 Hz | 5,000,000 sps | 4,500,000 Hz | 63 | No |
 | `glonass-l1of` | 1,602,000,000 Hz nominal | 12,000,000 sps | 10,000,000 Hz | 24 | Slots -7…+6 |
 | `mixed-open` | 1,582,392,500 Hz | 48,000,000 sps | 47,100,000 Hz | per service | Yes |
@@ -109,4 +109,3 @@ check. The hardware layer then repeats validation against realized values.
 # Timestamped geodetic motion plus a live controller
 ./bladegps -S gps-l1ca -p route-llh.csv -j 0 -d 120
 ```
-

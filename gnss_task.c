@@ -175,7 +175,7 @@ void *gnss_task(void *argument)
 	size_t candidate_records[MAX_GNSS_CANDIDATES];
 	gnss_signal_t candidate_signals[MAX_GNSS_CANDIDATES];
 	const gnss_signal_profile_t *profile=gnss_signal_profile(sim->opt.signal);
-	double **xyz=NULL,*xyz_data=NULL,receiver_velocity[3]={0};
+	double **xyz=NULL,*xyz_data=NULL,receiver_velocity[3]={0},live_offset[3]={0};
 	int16_t *iq=NULL; size_t record_count=0U,selected[RF_CHANNELS],selected_count;
 	int numd,step,error=1,direction=UNDEF; double interactive_velocity=0.0; gpstime_t time=sim->opt.g0;
 	int8_t iono_alpha[4]={0},iono_beta[4]={0};
@@ -223,28 +223,37 @@ void *gnss_task(void *argument)
 		for(system=GNSS_SYSTEM_GPS;system<GNSS_SYSTEM_COUNT;system++)for(n=0;n<=MAX_GNSS_PRN;n++){
 			best[system][n]=SIZE_MAX;best_age[system][n]=HUGE_VAL;}
 		if(stop_was_requested())break;
-		if(step>0&&(sim->opt.interactive||controller.active))
-			memcpy(xyz[step],xyz[step-1],3U*sizeof(double));
-		if(sim->opt.interactive) {
+		if(step>0&&(sim->opt.interactive||controller.active)) {
+			double neu_velocity[3]={0.0,0.0,0.0};
+			if(sim->opt.interactive) {
 			int key_direction=UNDEF;
 			if(_kbhit())switch(_getch()){case NORTH_KEY:key_direction=NORTH;break;
 				case SOUTH_KEY:key_direction=SOUTH;break;case EAST_KEY:key_direction=EAST;break;
 				case WEST_KEY:key_direction=WEST;break;case UP_KEY:key_direction=UP;break;
 				case DOWN_KEY:key_direction=DOWN;break;default:break;}
-			if(key_direction!=UNDEF&&direction==key_direction){if(interactive_velocity<MAX_VEL)interactive_velocity+=DEL_VEL;}
-			else if(interactive_velocity>=0.0)interactive_velocity-=DEL_VEL;else direction=key_direction;
-			if(step>0&&direction!=UNDEF&&interactive_velocity>=0.0){double llh[3],m[3][3],neu[3]={0,0,0};
-				xyz2llh(xyz[step-1],llh);ltcmat(llh,m);
-				if(direction==NORTH)neu[0]=interactive_velocity*0.1;else if(direction==SOUTH)neu[0]=-interactive_velocity*0.1;
-				else if(direction==EAST)neu[1]=interactive_velocity*0.1;else if(direction==WEST)neu[1]=-interactive_velocity*0.1;
-				else if(direction==UP)neu[2]=interactive_velocity*0.1;else if(direction==DOWN)neu[2]=-interactive_velocity*0.1;
-				for(n=0;n<3U;n++)xyz[step][n]+=m[0][n]*neu[0]+m[1][n]*neu[1]+m[2][n]*neu[2];}
-		}
-		if(step>0&&controller.active) {
-			double llh[3],m[3][3],neu[3];
-			if(motion_controller_poll(&controller,MAX_VEL,MAX_VEL,neu)!=0){failure="game controller disconnected";goto done;}
-			xyz2llh(xyz[step-1],llh);ltcmat(llh,m);
-			for(n=0;n<3U;n++)xyz[step][n]+=0.1*(m[0][n]*neu[0]+m[1][n]*neu[1]+m[2][n]*neu[2]);
+			if(motion_keyboard_update(key_direction,&direction,&interactive_velocity,
+				DEL_VEL,MAX_VEL)!=0){failure="invalid keyboard motion state";goto done;}
+			if(direction==NORTH)neu_velocity[0]+=interactive_velocity;
+			else if(direction==SOUTH)neu_velocity[0]-=interactive_velocity;
+			else if(direction==EAST)neu_velocity[1]+=interactive_velocity;
+			else if(direction==WEST)neu_velocity[1]-=interactive_velocity;
+			else if(direction==UP)neu_velocity[2]+=interactive_velocity;
+			else if(direction==DOWN)neu_velocity[2]-=interactive_velocity;
+			}
+			if(controller.active) {
+				double controller_velocity[3];
+				if(motion_controller_poll(&controller,MAX_VEL,MAX_VEL,controller_velocity)!=0){
+					failure="game controller disconnected";goto done;}
+				for(n=0;n<3U;n++)neu_velocity[n]+=controller_velocity[n];
+			}
+			{
+				double llh[3],m[3][3],current[3];
+				for(n=0;n<3U;n++)current[n]=xyz[step][n]+live_offset[n];
+				xyz2llh(current,llh);ltcmat(llh,m);
+				for(n=0;n<3U;n++)live_offset[n]+=0.1*(m[0][n]*neu_velocity[0]+
+					m[1][n]*neu_velocity[1]+m[2][n]*neu_velocity[2]);
+				for(n=0;n<3U;n++)xyz[step][n]+=live_offset[n];
+			}
 		}
 		for(n=0;n<record_count;n++)if(matching(&records[n],sim->opt.signal)&&record_healthy(&records[n])){
 			const gnss_signal_profile_t *record_profile=gnss_signal_profile(record_signal(&records[n]));

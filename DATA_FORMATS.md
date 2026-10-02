@@ -85,8 +85,10 @@ time_seconds,ecef_x_metres,ecef_y_metres,ecef_z_metres
 ```
 
 Time must be finite and strictly increasing. Position fields must be finite.
-The series is linearly resampled onto the 10 Hz simulation clock. Receiver
-velocity is the ECEF difference between consecutive 100 ms output samples.
+Every row must contain exactly four comma-separated numeric fields; trailing
+data and truncated overlong lines are rejected. The series is linearly
+resampled onto the 10 Hz simulation clock. Receiver velocity is the ECEF
+difference between consecutive 100 ms output samples.
 
 ## Geodetic motion CSV
 
@@ -97,7 +99,8 @@ time_seconds,latitude_degrees,longitude_degrees,height_metres
 ```
 
 Latitude/longitude ranges match `-l`. Valid rows are converted to ECEF, then
-linearly resampled at 10 Hz.
+linearly resampled at 10 Hz. The same exact four-field and line-length rules as
+ECEF motion apply.
 
 ## NMEA GGA
 
@@ -105,8 +108,13 @@ linearly resampled at 10 Hz.
 
 - Sentences with a checksum must pass it.
 - No-fix records are ignored.
-- UTC `hhmmss.s` timestamps are validated and unwrapped across midnight.
-- Latitude/longitude hemispheres and altitude are converted to ECEF.
+- UTC `hhmmss.s` timestamps are validated and cumulatively unwrapped across
+  any number of midnight transitions.
+- Numeric tokens must parse completely and remain finite; malformed records are
+  skipped without shifting later fields.
+- Latitude/longitude degree-minute ranges and `N/S/E/W` hemispheres are
+  validated, and altitude plus geoid separation must use metre (`M`) units.
+- Valid latitude/longitude and ellipsoidal height are converted to ECEF.
 - Accepted fixes are linearly resampled at 10 Hz.
 
 A file with no usable positions fails generation rather than falling back to a
@@ -115,10 +123,13 @@ different location.
 ## Live motion
 
 Keyboard and controller inputs are north/east/up velocities in the receiver's
-current local tangent frame. The frame is recomputed as position changes.
+current local tangent frame. The frame is recomputed as position changes. Live
+displacement is accumulated as an offset on the selected static, CSV, or NMEA
+base trajectory, so enabling a controller does not freeze prerecorded motion.
 
 - Keyboard speed changes by `DEL_VEL = 0.1 m/s` per update and is capped at
-  `MAX_VEL = 1.4 m/s`.
+  `MAX_VEL = 1.4 m/s`. A new direction begins at one increment on its first
+  key event; updates without a new event decelerate toward zero.
 - SDL2 axes use a raw dead zone of 4096, remap the remaining range to 0…1, and
   normalize horizontal diagonals so their magnitude never exceeds one.
 - Controller horizontal and vertical maxima are both 1.4 m/s in production.
@@ -137,4 +148,3 @@ headroom before final saturation. One generation block is exactly
 `sample_rate / 10` complex samples (100 ms). The FIFO stores two such blocks in
 complex-sample units, and the TX thread submits 32768 complex samples per
 synchronous transfer.
-

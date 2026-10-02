@@ -22,7 +22,7 @@ GNSS authority or measured with calibrated RF equipment.
 | CLI profile | Service | Carrier plan | Primary code | Navigation rate | Default sample rate | Default analog bandwidth | Production status |
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- |
 | `gps-l1ca` | GPS L1 C/A + LNAV | 1575.42 MHz CDMA | 1023 chips at 1.023 Mcps | 50 bit/s | 2.6 Msps | 2.5 MHz | Implemented |
-| `galileo-e1` | Galileo E1-B data + E1-C pilot, I/NAV | 1575.42 MHz CDMA | 4092 chips at 1.023 Mcps | 250 symbol/s after coding | 4.092 Msps | 4.0 MHz | Implemented; optional I/NAV content is partial |
+| `galileo-e1` | Galileo E1-B data + E1-C pilot, I/NAV | 1575.42 MHz CDMA | 4092 chips at 1.023 Mcps | 250 symbol/s after coding | 36.828 Msps | 24.552 MHz reference bandwidth | Implemented; optional I/NAV content is partial |
 | `beidou-b1i` | BeiDou B1I D1/D2 | 1561.098 MHz CDMA | 2046 chips at 2.046 Mcps | D1 50 bit/s; D2 500 bit/s | 5.0 Msps | 4.5 MHz | Implemented; optional service/almanac content is partial |
 | `glonass-l1of` | GLONASS L1OF + GNAV | 1602 MHz + `k × 562.5 kHz`, `k=-7…+6` | 511 chips at 0.511 Mcps | 50 bit/s before 100 Hz meander | 12.0 Msps | 10.0 MHz | Implemented; unavailable almanac is marked non-operational |
 | `mixed-open` | All four services above | 1582.3925 MHz plan center | Per-service | Per-service | 48.0 Msps | 47.1 MHz | Implemented when hardware covers the complete span |
@@ -111,8 +111,8 @@ RF frame must not imply that optional real-world service data was available.
 | ECEF CSV | `-u file` | `time,x,y,z` in seconds/metres | Resampled to 10 Hz | Implemented |
 | Geodetic CSV | `-p file` | `time,lat,lon,height` | Validated and resampled to 10 Hz | Implemented |
 | NMEA GGA | `-g file` | Latitude/longitude/altitude | Checksum validation, midnight unwrap, 10 Hz resampling | Implemented |
-| Keyboard | `-i` | Local north/east/up velocity | Updated every 100 ms | Implemented |
-| SDL2 controller | `-j index` | Left stick north/east, right stick vertical | Dead zone and diagonal normalization | Optional at build time |
+| Keyboard | `-i` | Local north/east/up velocity offset over the selected base route | First-event start, acceleration/deceleration every 100 ms | Implemented |
+| SDL2 controller | `-j index` | Left stick north/east, right stick vertical, accumulated over the selected base route | Dead zone and diagonal normalization | Optional at build time |
 
 Receiver velocity is derived from successive ECEF samples and contributes to
 range rate and Doppler. A controller disconnect is an error; the simulator does

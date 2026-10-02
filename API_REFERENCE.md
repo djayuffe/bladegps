@@ -227,6 +227,7 @@ rail contacts, and peak absolute component.
 | `motion_controller_open(controller, index)` | Opens a zero-based SDL game-controller. Returns 0, -1 for invalid/runtime failure, or -2 when built without SDL2. |
 | `motion_controller_poll(controller, horizontal_max, vertical_max, neu)` | Updates events, checks attachment, applies dead zone/normalization, and returns north/east/up m/s. Returns 0, -1, or -2 without SDL2. |
 | `motion_controller_close(controller)` | Closes the handle/subsystem if active and clears state; null-safe. |
+| `motion_keyboard_update(requested, active, speed, increment, maximum)` | Advances one keyboard-velocity update: a new positive direction starts at one increment, repeated events accelerate to the cap, and direction zero decelerates to rest. Returns 0/-1 and rejects non-finite or inconsistent state. |
 
 ## Production threads and FIFO — `bladegps.c`, `gnss_task.h`
 

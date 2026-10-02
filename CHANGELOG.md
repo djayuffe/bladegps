@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Preserved carrier, code, navigation-data, and overlay phase across normal
+  per-block Doppler/rate updates; rate changes no longer make an unchanged
+  satellite look like a newly allocated channel.
+- Reworked live keyboard/controller motion as an accumulated local-frame
+  offset on top of static or prerecorded receiver motion instead of replacing
+  the selected base route; keyboard direction changes now take effect on the
+  first event and decelerate deterministically.
+- Hardened NMEA GGA parsing with strict finite decimal/integer fields,
+  hemisphere and degree/minute validation, metre-unit validation, exact
+  checksum syntax, cumulative multi-day midnight unwrapping, and regression
+  coverage for malformed and checksummed data.
+- Replaced permissive motion-CSV scanning with exact four-field parsing,
+  complete numeric consumption, finite-value checks, and explicit rejection of
+  trailing data or truncated overlong rows.
+- Raised the Galileo E1 production RF validator to the ICD v2.2 24.552 MHz
+  receiver reference bandwidth and the default sample rate to 36.828 Msps.
+  Three samples per CBOC subchip preserve BOC(6,1) while leaving Doppler margin,
+  instead of aliasing the component at the old 4.092 Msps default.
 - Unified standalone GPS L1 C/A and mixed-system generation on the same
   constellation-neutral baseband producer, allocator, continuous-phase mixer,
   SC16 normalizer, and FIFO path.
