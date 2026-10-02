@@ -57,6 +57,8 @@ static void test_time_conversions(void)
 		gnss_calendar_time_t leap={2016,12,31,23,59,60.0};
 		gnss_calendar_time_t after={2017,1,1,0,0,0.0};
 		gnss_calendar_time_t ordinary={2021,7,5,2,0,0.0};
+		gnss_calendar_time_t false_leap={2016,12,30,23,59,60.0};
+		gnss_calendar_time_t false_hour={2016,12,31,22,59,60.0};
 		gpstime_t gb,gl,ga,gps,galileo,beidou,glonass;
 		int offset;
 		assert(gnss_gps_utc_offset(&before,&offset)==0 && offset==17);
@@ -64,6 +66,8 @@ static void test_time_conversions(void)
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&before,&gb)==0);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&leap,&gl)==0);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&after,&ga)==0);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&false_leap,&ga)==-1);
+		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&false_hour,&ga)==-1);
 		assert(fabs(gnss_time_difference(&gl,&gb)-1.0)<1.0e-12);
 		assert(fabs(gnss_time_difference(&ga,&gl)-1.0)<1.0e-12);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GPS,&ordinary,&gps)==0);
@@ -1112,6 +1116,33 @@ static void test_rinex4_mixed_navigation(void)
 	assert(gnss_schedule_galileo_e1(&records[0],2300U,175200U,galileo_cycle)==0);
 	assert(galileo_cycle[0]==1 || galileo_cycle[0]==-1);
 	{
+		uint8_t expected_even[GALILEO_INAV_PAGE_PART_SYMBOLS];
+		uint8_t expected_odd[GALILEO_INAV_PAGE_PART_SYMBOLS];
+		uint8_t empty_osnma[GALILEO_INAV_OSNMA_BITS]={0};
+		uint8_t empty_sar[GALILEO_INAV_SAR_BITS]={0};
+		uint8_t dummy_sequence[186]={0};
+		size_t index;
+		/* Table 40: word 2 is even at GST mod-30 second 1 and odd at
+		 * second 2, whose SSP is SSP1. */
+		assert(gnss_galileo_inav_e1b_page(galileo_words[1],empty_osnma,
+			empty_sar,0U,GALILEO_INAV_SSP1,expected_even,expected_odd,NULL)==0);
+		for(index=0U;index<GALILEO_INAV_PAGE_PART_SYMBOLS;index++) {
+			assert(galileo_cycle[GALILEO_INAV_PAGE_PART_SYMBOLS+index]==
+				(expected_even[index]? -1:1));
+			assert(galileo_cycle[2U*GALILEO_INAV_PAGE_PART_SYMBOLS+index]==
+				(expected_odd[index]? -1:1));
+		}
+		/* Unavailable word 16 uses the vertical ICD dummy page and wraps
+		 * from second 29 to second 0 without an SSP field. */
+		assert(gnss_galileo_inav_e1b_dummy_page(dummy_sequence,
+			expected_even,expected_odd,NULL)==0);
+		for(index=0U;index<GALILEO_INAV_PAGE_PART_SYMBOLS;index++) {
+			assert(galileo_cycle[29U*GALILEO_INAV_PAGE_PART_SYMBOLS+index]==
+				(expected_even[index]? -1:1));
+			assert(galileo_cycle[index]==(expected_odd[index]? -1:1));
+		}
+	}
+	{
 		int8_t next_cycle[GALILEO_E1_CYCLE_SYMBOLS];
 		assert(gnss_schedule_galileo_e1(&records[0],2300U,175230U,next_cycle)==0);
 		assert(memcmp(galileo_cycle,next_cycle,sizeof(next_cycle))!=0);
@@ -1162,7 +1193,28 @@ static void test_rinex4_mixed_navigation(void)
 	assert(glonass_immediate.ft == 2U && glonass_immediate.bn == 0U);
 	assert(gnss_glonass_gnav_immediate_strings(&glonass_immediate,
 		glonass_strings) == 0);
-	assert(gnss_schedule_glonass(&records[2],glonass_cycle)==0);
+	{
+		gnss_calendar_time_t live_utc={2020,9,15,23,59,30.0};
+		glonass_gnav_string5_t live_time={0};
+		uint8_t relative_state=0U;
+		assert(gnss_glonass_gnav_apply_frame_time(&glonass_immediate,
+			&live_time,&live_utc)==0);
+		assert(glonass_immediate.tk_seconds==10770U);
+		assert(glonass_immediate.nt==260U&&live_time.na==260U&&live_time.n4==7U);
+		assert(gnss_schedule_glonass(&records[2],&live_utc,
+			&relative_state,glonass_cycle)==0);
+		assert(relative_state<=1U);
+		{
+			int8_t seeded_cycle[GLONASS_GNAV_FRAME_SYMBOLS];
+			uint8_t seeded_state=1U;
+			assert(gnss_schedule_glonass(&records[2],&live_utc,
+				&seeded_state,seeded_cycle)==0);
+			assert(seeded_cycle[0]==-glonass_cycle[0]);
+		}
+		live_utc.second=31.0;
+		assert(gnss_glonass_gnav_apply_frame_time(&glonass_immediate,
+			&live_time,&live_utc)==-1);
+	}
 	assert(glonass_cycle[0]==1 || glonass_cycle[0]==-1);
 	observation_time.y=records[2].toc.year; observation_time.m=records[2].toc.month;
 	observation_time.d=records[2].toc.day; observation_time.hh=records[2].toc.hour;

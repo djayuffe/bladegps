@@ -34,6 +34,9 @@ int gnss_glonass_gnav_immediate_strings(const glonass_gnav_immediate_t *fields,
 	uint8_t strings[4][GLONASS_GNAV_STRING_BITS]);
 int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *record,
 	glonass_gnav_immediate_t *fields);
+int gnss_glonass_gnav_apply_frame_time(glonass_gnav_immediate_t *immediate,
+	glonass_gnav_string5_t *time_data,
+	const gnss_calendar_time_t *utc_frame_time);
 int gnss_glonass_gnav_string5(const glonass_gnav_string5_t *fields,
 	uint8_t string[GLONASS_GNAV_STRING_BITS]);
 int gnss_glonass_gnav_almanac_pair(const glonass_gnav_almanac_t *fields,

@@ -25,7 +25,7 @@ before transmission.
 | Broadcast ephemeris parser | Shared typed GPS RINEX 2 and RINEX 3/4 LNAV | Typed RINEX 3/4 INAV/FNAV; E1 production consumes INAV only | Typed RINEX 3/4 D1/D2 | Typed RINEX 3/4 FDMA |
 | Orbit/clock model | Implemented | Integrated Kepler/clock/relativity, iterative transmit time, Sagnac, range rate and Doppler | Integrated MEO/IGSO/GEO orbit/clock, iterative transmit time, Sagnac, range rate and Doppler | Integrated RK4 state-vector/J2/Earth-rotation, iterative transmit time, range rate and Doppler |
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
-| Navigation message | GPS LNAV | I/NAV ephemeris words 1-4 and word 5 with RINEX health/BGD, correct GST week/TOW, CRC-24Q, convolutional coding, interleaving, sync/SSP, and 30-second rescheduling; unavailable optional service/almanac/FEC2 slots use the ICD dummy word instead of false zero-valued content | D1 subframes 1-3, D2 GEO basic pages 1-10, RINEX 3/4 Klobuchar coefficients, BCH/interleaving, headers and rollover; library almanac builders are available, while service subframes not supplied by ephemeris/ION input are emitted as encoded reserved payloads | Immediate strings 1-4 and calendar-derived string 5, Hamming protection, relative/meander/time-mark symbols; almanac pairs absent from an FDMA ephemeris record are explicitly marked non-operational |
+| Navigation message | GPS LNAV | I/NAV ephemeris words 1-4 and word 5 with RINEX health/BGD, correct GST week/TOW, CRC-24Q, convolutional coding, interleaving, sync/SSP, and exact circular E1-B page-part timing; unavailable optional service/almanac/FEC2/ISM slots use the 192-bit vertical ICD dummy page | D1 subframes 1-3, D2 GEO basic pages 1-10, RINEX 3/4 Klobuchar coefficients, BCH/interleaving, headers and rollover; library almanac builders are available, while service subframes not supplied by ephemeris/ION input are emitted as encoded reserved payloads | Immediate strings 1-4 and calendar-derived string 5 with live UTC(SU)+3 frame time, Hamming protection, relative/meander/time-mark symbols; almanac pairs absent from an FDMA ephemeris record are explicitly marked non-operational |
 | Modulation/mixer | Production BPSK(1) | Production E1-B/E1-C CBOC with continuous code/data/pilot-secondary/carrier phase | Production BPSK with D1 NH overlay and D2 500 bit/s scheduling | Production relative-code/meander/time-mark formatting and per-slot continuous-phase FDMA |
 | Hardware configuration/read-back | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required |
 
@@ -66,6 +66,8 @@ data as the primary symbol stream and its 1 kchip/s Neumann-Hoffman sequence as
 the overlay; D2 omits the NH overlay and uses its 500 bit/s stream directly.
 GLONASS GNAV strings are differentially encoded, modulo-2 combined with the
 100 Hz auxiliary meander for 1.7 seconds, and followed by the 30-chip time mark.
+The terminal differential bit is retained per satellite and seeds the next
+30-second frame, so relative coding does not restart at scheduler boundaries.
 
 The standalone Galileo E1 profile preserves the ICD 24.552 MHz receiver
 reference bandwidth as its minimum waveform span, requests a 28 MHz analog
@@ -155,8 +157,10 @@ described as receiver-validated or RF-certified until all of these pass:
 
 ## Normative references
 
+- GPS Interface Control Documents, including IS-GPS-200: <https://www.gps.gov/interface-control-documents-icds-interface-specifications-iss>
 - Galileo Open Service Signal-in-Space Interface Control Document, current in-force edition: <https://www.gsc-europa.eu/electronic-library/programme-reference-documents/galileo-in-force/open-service>
 - BeiDou Navigation Satellite System Signal In Space Interface Control Documents: <https://www.csno-tarc.cn/userSupport/document>
+- GLONASS Interface Control Documents and official reference material: <https://glonass-svoevi.ru/documents.php>
 - IGS RINEX 4.02 format: <https://files.igs.org/pub/data/format/rinex_4.02.pdf>
 - IGS Multi-GNSS Experiment data and products: <https://igs.org/mgex/data-products/>
 

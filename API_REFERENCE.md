@@ -57,7 +57,7 @@ helpers are implementation details and are described by responsibility in
 | --- | --- | --- |
 | `gnss_calendar_to_gps(system, calendar, gps)` | Validates a native RINEX calendar epoch and converts it to continuous GPS week/SOW. GPS/GST are aligned, BDT is 14 seconds behind GPS, and GLONASS epochs use the historical GPS-UTC table. | 0/-1. |
 | `gnss_gps_to_system_time(system, gps, system_time)` | Converts continuous GPS time to the constellation scheduling scale while retaining a continuous Sunday-based week. | 0/-1. |
-| `gnss_gps_utc_offset(utc, offset)` | Returns historical GPS−UTC seconds. An inserted `23:59:60` uses the offset valid during that leap second. | 0/-1. |
+| `gnss_gps_utc_offset(utc, offset)` | Returns historical GPS−UTC seconds. An inserted `23:59:60` uses the offset valid during that leap second; second 60 is rejected outside a listed insertion date at 23:59. | 0/-1. |
 | `gnss_time_difference(newer, older)` | Full-week difference `(week delta × 604800) + SOW delta`. | Seconds; `NAN` for null pointers (non-finite members propagate naturally). |
 
 ## Typed navigation input — `gnss_nav.h`
@@ -122,6 +122,11 @@ All encoders except CRC return 0/-1 and reject input bytes other than 0/1.
 
 ## Galileo I/NAV — `gnss_galileo_nav.h`
 
+`gnss_galileo_inav_e1b_dummy_page()` builds the ICD 2.2 vertical dummy format:
+192 dummy-data bits (type 63 plus 186 sequence bits), vertical CRC, eight spare
+bits, convolutional coding, interleaving, and sync. It deliberately carries no
+SSP because the dummy-page spare field replaces it.
+
 The `galileo_inav_word1_t` … `word5_t` structures contain already quantized
 ICD integer fields. Builders reject values wider than their bit allocation.
 
@@ -159,6 +164,7 @@ slot, frequency, and almanac metadata.
 | --- | --- |
 | `gnss_glonass_gnav_immediate_strings(fields, strings)` | Builds protected strings 1–4 from immediate data. |
 | `gnss_glonass_gnav_from_rinex(record, fields)` | Converts a typed FDMA state-vector record to immediate GNAV fields. |
+| `gnss_glonass_gnav_apply_frame_time(immediate, time, utc)` | Converts the live UTC frame epoch to UTC(SU)+3 and updates `tk`, `NT`, `NA`, and `N4`, including civil-day rollover. Requires an exact 30-second boundary. |
 | `gnss_glonass_gnav_string5(fields, string)` | Builds UTC/system-time string 5. |
 | `gnss_glonass_gnav_almanac_pair(fields, even_no, even, odd)` | Builds one legal even/odd almanac pair. |
 | `gnss_glonass_gnav_frame(immediate, time, almanacs, frame)` | Builds all fifteen strings; the five-element almanac array supplies pairs 6–15. |
@@ -167,10 +173,10 @@ slot, frequency, and almanac metadata.
 
 | Function | Output and schedule |
 | --- | --- |
-| `gnss_schedule_galileo_e1(record, week, tow, symbols)` | 7500 NRZ symbols = fifteen two-second pages = 30 seconds at 250 symbols/s. |
+| `gnss_schedule_galileo_e1(record, week, tow, symbols)` | 7500 NRZ symbols using the modulo-30 E1-B sequence: second 0 closes the pair begun at second 29, followed by pairs at 1/2 through 27/28. Unavailable scheduled content uses vertical dummy pages. |
 | `gnss_schedule_beidou_d1(record, alpha, beta, sow, symbols)` | 1500 symbols = five six-second subframes = 30 seconds at 50 bit/s. |
 | `gnss_schedule_beidou_d2(record, alpha, beta, sow, symbols)` | 15000 symbols = ten three-second frames = 30 seconds at 500 bit/s. |
-| `gnss_schedule_glonass(record, symbols)` | 3000 symbols = fifteen two-second strings at the post-meander 100 symbol/s rate. |
+| `gnss_schedule_glonass(record, utc_frame_time, previous_relative_bit, symbols)` | 3000 symbols = fifteen two-second strings at the post-meander 100 symbol/s rate. Live UTC is converted to UTC(SU)+3 for `tk`, `NT`, `NA`, and `N4`; the caller-owned differential bit carries relative-code state across frames. |
 
 Each function validates record family/fields and returns 0/-1.
 

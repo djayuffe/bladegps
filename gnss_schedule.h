@@ -19,6 +19,8 @@ int gnss_schedule_beidou_d2(const gnss_nav_record_t *record,
 	const int8_t alpha[4], const int8_t beta[4], uint32_t frame_sow,
 	int8_t symbols[BEIDOU_D2_CYCLE_SYMBOLS]);
 int gnss_schedule_glonass(const gnss_nav_record_t *record,
+	const gnss_calendar_time_t *utc_frame_time,
+	uint8_t *previous_relative_bit,
 	int8_t symbols[GLONASS_GNAV_FRAME_SYMBOLS]);
 
 #endif

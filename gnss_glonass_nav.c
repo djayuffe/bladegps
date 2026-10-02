@@ -171,6 +171,53 @@ static int four_year_day(const gnss_calendar_time_t *time)
 	return total + day_of_year(time->year,time->month,time->day);
 }
 
+static int days_in_month(int year, int month)
+{
+	static const int days[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+	if(month<1||month>12)return 0;
+	return days[month-1]+(month==2&&leap_year(year)?1:0);
+}
+
+int gnss_glonass_gnav_apply_frame_time(glonass_gnav_immediate_t *immediate,
+	glonass_gnav_string5_t *time_data,
+	const gnss_calendar_time_t *utc_frame_time)
+{
+	gnss_calendar_time_t local;
+	int seconds,nt,start;
+	long rounded_second;
+	if(immediate==NULL||time_data==NULL||utc_frame_time==NULL||
+		utc_frame_time->year<1996||utc_frame_time->month<1||
+		utc_frame_time->month>12||utc_frame_time->day<1||
+		utc_frame_time->day>days_in_month(utc_frame_time->year,utc_frame_time->month)||
+		utc_frame_time->hour<0||utc_frame_time->hour>23||
+		utc_frame_time->minute<0||utc_frame_time->minute>59||
+		!isfinite(utc_frame_time->second))return -1;
+	rounded_second=lround(utc_frame_time->second);
+	if(fabs(utc_frame_time->second-(double)rounded_second)>1.0e-6||
+		rounded_second<0L||rounded_second>59L)return -1;
+	local=*utc_frame_time;
+	seconds=local.hour*3600+local.minute*60+(int)rounded_second+10800;
+	if(seconds>=86400) {
+		seconds-=86400;local.day++;
+		if(local.day>days_in_month(local.year,local.month)) {
+			local.day=1;local.month++;
+			if(local.month>12){local.month=1;local.year++;}
+		}
+	}
+	if((seconds%30)!=0)return -1;
+	local.hour=seconds/3600;local.minute=(seconds%3600)/60;
+	local.second=(double)(seconds%60);
+	nt=four_year_day(&local);start=local.year;
+	while(!leap_year(start))start--;
+	if(nt<1||nt>1461||start<1996||(start-1996)%4!=0||
+		(start-1996)/4+1>31)return -1;
+	immediate->tk_seconds=(uint32_t)seconds;
+	immediate->nt=(uint16_t)nt;
+	time_data->na=(uint16_t)nt;
+	time_data->n4=(uint8_t)((start-1996)/4+1);
+	return 0;
+}
+
 int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *r,
 	glonass_gnav_immediate_t *f)
 {

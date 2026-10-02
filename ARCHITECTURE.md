@@ -270,7 +270,8 @@ group delay are kept in the modeled measurement path.
   `generateNavMsg()`.
 - Galileo E1-B/E1-C primary codes, E1-C secondary code, and scheduled I/NAV.
 - BeiDou B1I code, D1 NH overlay, and the applicable D1 or D2 navigation cycle.
-- GLONASS L1OF code and a fifteen-string GNAV cycle containing relative-code,
+- GLONASS L1OF code and a fifteen-string GNAV cycle whose immediate/time fields
+  are regenerated from each live UTC(SU)+3 frame epoch, containing relative-code,
   meander, and time-mark symbols.
 
 Stores are rebuilt when their broadcast record, system week, or 30-second

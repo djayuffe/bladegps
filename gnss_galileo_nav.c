@@ -324,6 +324,39 @@ int gnss_galileo_inav_e1b_page(const uint8_t word[GALILEO_INAV_WORD_BITS],
 	return 0;
 }
 
+int gnss_galileo_inav_e1b_dummy_page(const uint8_t sequence[186],
+	uint8_t even_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS],
+	uint8_t odd_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS], uint32_t *crc)
+{
+	uint8_t dummy[192],even[GALILEO_INAV_PAGE_PART_BITS]={0};
+	uint8_t odd[GALILEO_INAV_PAGE_PART_BITS]={0},protected_bits[196];
+	size_t dummy_offset=0U,even_offset=0U,odd_offset=0U,protected_offset=0U;
+	uint32_t checksum;
+	if(!valid_bits(sequence,186U)||even_symbols==NULL||odd_symbols==NULL)return -1;
+	append_uint(dummy,&dummy_offset,63U,6U);
+	memcpy(dummy+dummy_offset,sequence,186U);dummy_offset+=186U;
+	if(dummy_offset!=sizeof(dummy))return -1;
+	/* OS SIS ICD 2.2 Tables 56-57: one vertical E1-B dummy page.
+	 * The final eight bits are spare, not a secondary sync pattern. */
+	append_uint(even,&even_offset,0U,2U);
+	memcpy(even+even_offset,dummy,112U);even_offset+=112U;
+	memcpy(protected_bits+protected_offset,even,114U);protected_offset+=114U;
+	even_offset+=6U;
+	append_uint(odd,&odd_offset,2U,2U);
+	memcpy(odd+odd_offset,dummy+112U,80U);odd_offset+=80U;
+	memcpy(protected_bits+protected_offset,odd,82U);protected_offset+=82U;
+	checksum=gnss_crc24q_bits(protected_bits,protected_offset);
+	append_uint(odd,&odd_offset,checksum,24U);
+	odd_offset+=8U; /* Spare. */
+	odd_offset+=6U; /* Convolutional encoder tail. */
+	if(even_offset!=GALILEO_INAV_PAGE_PART_BITS||
+		odd_offset!=GALILEO_INAV_PAGE_PART_BITS||protected_offset!=196U||
+		encode_page_part(even,even_symbols)!=0||
+		encode_page_part(odd,odd_symbols)!=0)return -1;
+	if(crc!=NULL)*crc=checksum;
+	return 0;
+}
+
 int gnss_galileo_inav_e1b_word_type(unsigned int gst_second_mod_30)
 {
 	static const int words[30] = {

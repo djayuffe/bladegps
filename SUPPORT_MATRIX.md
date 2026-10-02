@@ -59,7 +59,7 @@ elevation, and the best sixteen are retained.
 | FEC/parity/interleaving | GPS word parity through the LNAV backend | CRC-24Q, convolutional coding, interleaving, sync/SSP | BCH and interleaving | Hamming protection | Per service |
 | Secondary/overlay sequence | None | E1-C 25-chip secondary code | D1 20-chip NH; none for D2 | Relative code + meander + time mark | Per service |
 | RF modulation | BPSK(1) | Equal-power E1-B/E1-C CBOC composite | BPSK with D1 overlay or D2 symbols | BPSK on individual FDMA carriers | Continuous complex summation |
-| Continuous block state | Carrier/code/data | Carrier/code/data/pilot overlay | Carrier/code/data/NH | Carrier/code/relative/meander | Reconciled for surviving channels |
+| Continuous block state | Carrier/code/data | Carrier/code/data/pilot overlay | Carrier/code/data/NH | Carrier/code/data plus frame-to-frame relative-code state | Reconciled for surviving channels |
 | SC16 Q11 normalization | Implemented | Implemented | Implemented | Implemented | Deterministic whole-bank headroom |
 | Hardware/receiver certification | Required | Required | Required | Required | Required |
 
@@ -68,10 +68,10 @@ elevation, and the best sixteen are retained.
 | Service | Generated content | Behavior when source data is absent |
 | --- | --- | --- |
 | GPS LNAV | Subframes built from broadcast clock, ephemeris, health, URA, TGD, IODE/IODC, week and time fields. | Required ephemeris fields fail validation; no synthetic healthy ephemeris is invented. |
-| Galileo I/NAV | Word types 1–4 ephemeris and word type 5 time/health/BGD, scheduled into nominal E1-B pages. | Optional service, almanac, and unavailable FEC2 content uses the defined dummy-word path rather than fabricated data. |
+| Galileo I/NAV | Word types 1–4 ephemeris and word type 5 time/health/BGD, scheduled into the ICD modulo-30 E1-B page-part sequence. | Optional service, almanac, FEC2, and ISM content unavailable from EPH input uses the distinct 192-bit vertical dummy-page format rather than fabricated nominal data. |
 | BeiDou D1 | Clock/service subframe 1, ephemeris subframes 2–3, ionosphere coefficients when supplied, BCH/interleaving and frame schedule. | Missing optional service or almanac input is encoded as reserved/unavailable content. |
 | BeiDou D2 | GEO basic-navigation pages 1–10 with D2 schedule and coding. | Optional data not represented by the broadcast record is reserved rather than guessed. |
-| GLONASS GNAV | Immediate strings 1–4, calendar/time string 5, relative encoding, meander and time mark. | Almanac data absent from the FDMA record is explicitly non-operational. |
+| GLONASS GNAV | Immediate strings 1–4, calendar/time string 5, live UTC(SU)+3 `tk`/`NT`/`NA`/`N4`, relative encoding, meander and time mark. | Almanac data absent from the FDMA record is explicitly non-operational. |
 
 These behaviors are deliberate data-integrity boundaries. A syntactically valid
 RF frame must not imply that optional real-world service data was available.
@@ -84,7 +84,7 @@ RF frame must not imply that optional real-world service data was available.
 | GPS/GST relationship | Implemented for supported broadcast scheduling |
 | GPS/BDT 14-second epoch offset | Implemented |
 | GLONASS UTC(SU)+3 scheduling basis | Implemented |
-| Historical GPS-UTC leap transitions used by tests | Implemented |
+| Historical GPS-UTC leap transitions and insertion-date validation | Implemented |
 | Arbitrary future leap-second prediction from navigation headers | Not implemented |
 | Per-satellite iterative transmit time | Implemented |
 | Navigation and overlay initial phase from transmit time | Implemented |
@@ -144,9 +144,9 @@ not silently continue with a frozen motion command.
 | Build diagnostics | Normal optimized build plus strict warning build (`-Wall -Wextra -Wpedantic -Werror`). |
 | Memory/undefined behavior | AddressSanitizer and UndefinedBehaviorSanitizer test run. |
 | Static analysis | Clang analyzer on the production integration and parser paths. |
-| Time | GPS epoch/week rollover, Gregorian century, historical leap boundary, GST/BDT/GLONASS conversion. |
+| Time | GPS epoch/week rollover, Gregorian century, historical leap boundary and invalid-insertion rejection, GST/BDT conversion, live GLONASS UTC(SU)+3 day rollover. |
 | Codes | GPS PRN 37, Galileo E1-B/E1-C table checks, BeiDou boundary PRNs, GLONASS L1OF/time mark. |
-| Navigation coding | Galileo CRC/FEC/interleaving/pages, BeiDou BCH/interleaving/D1/D2 pages, GLONASS strings/Hamming/frame. |
+| Navigation coding | Galileo CRC/FEC/interleaving, circular page-part timing and vertical dummy pages; BeiDou BCH/interleaving/D1/D2 pages; GLONASS live-time strings/Hamming/frame. |
 | RF rendering | Block-split equivalence, phase preservation, overlay operation, CBOC sample value, whole-bank headroom. |
 | Allocation | Health, elevation order, passband rejection, duplicate rejection, phase reconciliation. |
 | Input | Typed RINEX 2/3/4, malformed/truncated cases, compressed legacy sample, motion formats. |

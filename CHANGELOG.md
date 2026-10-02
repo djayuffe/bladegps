@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Corrected Galileo E1-B I/NAV transmission timing to the ICD 2.2 circular
+  page-part sequence: the second-0 odd half now closes the word begun at second
+  29, with subsequent even/odd pairs at 1/2, 3/4, and so on.
+- Added the distinct Galileo 192-bit vertical dummy-page encoder. Unavailable
+  service/FEC2/ISM words now use type 63, vertical CRC, and eight spare bits
+  rather than a nominal page carrying a false SSP.
+- Made GLONASS `tk`, `NT`, `NA`, and `N4` follow the live simulated transmit
+  epoch in UTC(SU)+3, including UTC-to-Moscow day rollover, instead of freezing
+  those fields at the RINEX record epoch.
+- Preserved the GLONASS differential/relative-code bit per satellite across
+  successive 30-second navigation frames instead of restarting it at zero.
+- Restricted `23:59:60` calendar input to actual historical positive leap-second
+  insertion dates and reject fabricated leap seconds at other dates or times.
 - Split each signal profile's minimum waveform span from its recommended analog
   filter. Galileo now requests 28 MHz around the 24.552 MHz reference span,
   BeiDou requests 5 MHz around 4.5012 MHz, and mixed mode uses 50 Msps with a

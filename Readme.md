@@ -302,9 +302,9 @@ coverage, payload boundaries, input formats, hardware support, and validation.
 | Profile | Constellation | Nominal carrier | Status | Notes |
 | --- | --- | ---: | --- | --- |
 | `gps-l1ca` | GPS | 1575.42 MHz | Implemented | C/A ranging code, LNAV, RINEX 2 GPS navigation, PRN 1-37 |
-| `galileo-e1` | Galileo | 1575.42 MHz | Software implemented | E1-B/C codes, CBOC, mixed-RINEX orbit/clock, scheduled I/NAV ephemeris/service pages, dummy substitution for unavailable optional service words, geometry, allocation and RF synthesis |
+| `galileo-e1` | Galileo | 1575.42 MHz | Software implemented | E1-B/C codes, CBOC, mixed-RINEX orbit/clock, ICD modulo-30 I/NAV page-part timing, vertical dummy pages for unavailable optional words, geometry, allocation and RF synthesis |
 | `beidou-b1i` | BeiDou | 1561.098 MHz | Software implemented | PRN 1–63 codes, D1/D2 selection, ephemeris/clock/ionosphere pages, geometry, NH overlay, allocation and RF synthesis |
-| `glonass-l1of` | GLONASS | 1602 MHz base | Software implemented | L1OF code, FDMA slot carriers, state-vector propagation, immediate GNAV/time strings, safe unavailable-almanac marking, relative/meander modulation and RF synthesis |
+| `glonass-l1of` | GLONASS | 1602 MHz base | Software implemented | L1OF code, FDMA slot carriers, state-vector propagation, live UTC(SU)+3 immediate/time strings, safe unavailable-almanac marking, relative/meander modulation and RF synthesis |
 | `mixed-open` | GPS + Galileo + BeiDou + GLONASS | 1582.3925 MHz plan center | Software implemented | One mixed RINEX input, constellation-native timing, shared health/elevation allocator, 16-channel continuous wideband mixer |
 
 Unknown or non-implemented profiles fail closed instead of silently producing a

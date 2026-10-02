@@ -17,16 +17,41 @@ static const leap_epoch_t leap_epochs[] = {
 	{1999,1,1},{2006,1,1},{2009,1,1},{2012,7,1},{2015,7,1},{2017,1,1}
 };
 
+static int days_in_month(int year, int month)
+{
+	static const int days[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+	if(month<1||month>12)return 0;
+	return days[month-1]+(month==2&&year%4==0&&
+		(year%100!=0||year%400==0)?1:0);
+}
+
+static int leap_insertion_date(const gnss_calendar_time_t *t)
+{
+	size_t index;
+	for(index=0U;index<sizeof(leap_epochs)/sizeof(leap_epochs[0]);index++) {
+		int year=leap_epochs[index].year,month=leap_epochs[index].month;
+		int day=leap_epochs[index].day-1;
+		if(day==0) {
+			month--;
+			if(month==0){month=12;year--;}
+			day=days_in_month(year,month);
+		}
+		if(t->year==year&&t->month==month&&t->day==day)return 1;
+	}
+	return 0;
+}
+
 static int calendar_valid(const gnss_calendar_time_t *t)
 {
-	static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};
 	int days;
 	if(t==NULL || t->year<1980 || t->month<1 || t->month>12 || t->day<1 ||
 		t->hour<0 || t->hour>23 || t->minute<0 || t->minute>59 ||
 		!isfinite(t->second) || t->second<0.0 || t->second>=61.0) return 0;
-	days=mdays[t->month-1];
-	if(t->month==2 && t->year%4==0 && (t->year%100!=0 || t->year%400==0)) days++;
-	return t->day<=days;
+	days=days_in_month(t->year,t->month);
+	if(t->day>days)return 0;
+	if(t->second>=60.0 && (t->hour!=23 || t->minute!=59 ||
+		!leap_insertion_date(t)))return 0;
+	return 1;
 }
 
 static int compare_date(const gnss_calendar_time_t *t, const leap_epoch_t *e)

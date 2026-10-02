@@ -80,6 +80,10 @@ int gnss_galileo_inav_e1b_page(const uint8_t word[GALILEO_INAV_WORD_BITS],
 	galileo_inav_ssp_t ssp,
 	uint8_t even_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS],
 	uint8_t odd_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS], uint32_t *crc);
+int gnss_galileo_inav_e1b_dummy_page(
+	const uint8_t sequence[186],
+	uint8_t even_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS],
+	uint8_t odd_symbols[GALILEO_INAV_PAGE_PART_SYMBOLS], uint32_t *crc);
 
 /* The nominal E1-B word type broadcast at the given integer GST second within
  * a 30-second I/NAV subframe. Almanac slots are returned as 7..10; the caller

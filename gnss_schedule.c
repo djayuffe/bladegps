@@ -8,29 +8,6 @@
 #include "gnss_glonass_nav.h"
 #include "gnss_rf.h"
 
-static int leap_year(int year)
-{
-	return year%4==0 && (year%100!=0 || year%400==0);
-}
-
-static int glonass_calendar_fields(const gnss_calendar_time_t *time,
-	uint16_t *day, uint8_t *cycle)
-{
-	static const unsigned int before_month[12]={0U,31U,59U,90U,120U,151U,
-		181U,212U,243U,273U,304U,334U};
-	int start,year,total;
-	if(time==NULL||day==NULL||cycle==NULL||time->year<1996||
-		time->month<1||time->month>12||time->day<1||time->day>31) return -1;
-	start=time->year;
-	while(!leap_year(start))start--;
-	total=(int)before_month[time->month-1]+time->day+
-		(time->month>2&&leap_year(time->year));
-	for(year=start;year<time->year;year++)total+=leap_year(year)?366:365;
-	if(total<1||total>1461||start<1996||(start-1996)%4!=0||
-		(start-1996)/4+1>31) return -1;
-	*day=(uint16_t)total;*cycle=(uint8_t)((start-1996)/4+1);return 0;
-}
-
 static void put_uint(uint8_t *bits, unsigned int value, unsigned int width)
 {
 	unsigned int index;
@@ -64,29 +41,39 @@ int gnss_schedule_galileo_e1(const gnss_nav_record_t *record,
 	uint8_t words[4][GALILEO_INAV_WORD_BITS],word[GALILEO_INAV_WORD_BITS];
 	uint8_t even[GALILEO_INAV_PAGE_PART_SYMBOLS],odd[GALILEO_INAV_PAGE_PART_SYMBOLS];
 	uint8_t osnma[GALILEO_INAV_OSNMA_BITS]={0},sar[GALILEO_INAV_SAR_BITS]={0};
-	unsigned int second;
+	uint8_t dummy_sequence[186]={0};
+	unsigned int even_second;
 	if(record==NULL || symbols==NULL || week>4095U || tow>=604800U ||
 		gnss_galileo_inav_ephemeris_words(record,words)!=0) return -1;
-	for(second=0U;second<30U;second+=2U) {
-		int type=gnss_galileo_inav_e1b_word_type(second);
-		size_t offset=(size_t)second*250U;
+	/* OS SIS ICD 2.2 Table 40: E1-B second 0 carries the odd half of the
+	 * word whose even half was sent at second 29 of the preceding subframe.
+	 * Complete pairs therefore start at odd-numbered seconds and the final
+	 * pair wraps circularly from second 29 to second 0. */
+	for(even_second=1U;even_second<30U;even_second+=2U) {
+		unsigned int odd_second=(even_second+1U)%30U;
+		int type=gnss_galileo_inav_e1b_word_type(even_second);
+		int dummy=0;
 		memset(word,0,sizeof(word));
 		if(type>=1 && type<=4) memcpy(word,words[type-1],sizeof(word));
 		else if(type==5) {
 			galileo_inav_word5_t fields={0};
-			fields.week=(uint16_t)week; fields.tow=(tow+second)%604800U;
+			fields.week=(uint16_t)week;
+			fields.tow=(tow+even_second)%604800U;
 			if(galileo_word5_from_rinex(record,&fields)!=0||
 				gnss_galileo_inav_word5(&fields,word)!=0) return -1;
 		} else {
-			/* Optional service/almanac/FEC2 content is not present in an EPH
-			 * record. ICD dummy word type 63 is the safe on-air substitute;
-			 * labeling a zero body as the scheduled type creates false data. */
-			put_uint(word,type==0?0U:63U,6U);
+			/* Word 0 is the nominal spare word. Other scheduled service,
+			 * almanac/FEC2/ISM content is absent from an EPH record and must be
+			 * replaced by the distinct ICD vertical dummy page. */
+			if(type==0)put_uint(word,0U,6U);else dummy=1;
 		}
-		if(gnss_galileo_inav_e1b_page(word,osnma,sar,0U,
-			gnss_galileo_inav_ssp_for_second(second%6U),even,odd,NULL)!=0 ||
-			gnss_rf_bits_to_symbols(even,sizeof(even),symbols+offset)!=0 ||
-			gnss_rf_bits_to_symbols(odd,sizeof(odd),symbols+offset+sizeof(even))!=0)
+		if((dummy?gnss_galileo_inav_e1b_dummy_page(dummy_sequence,even,odd,NULL):
+			gnss_galileo_inav_e1b_page(word,osnma,sar,0U,
+				gnss_galileo_inav_ssp_for_second(odd_second),even,odd,NULL))!=0 ||
+			gnss_rf_bits_to_symbols(even,sizeof(even),
+				symbols+(size_t)even_second*GALILEO_INAV_PAGE_PART_SYMBOLS)!=0 ||
+			gnss_rf_bits_to_symbols(odd,sizeof(odd),
+				symbols+(size_t)odd_second*GALILEO_INAV_PAGE_PART_SYMBOLS)!=0)
 			return -1;
 	}
 	return 0;
@@ -138,16 +125,20 @@ int gnss_schedule_beidou_d2(const gnss_nav_record_t *record,
 }
 
 int gnss_schedule_glonass(const gnss_nav_record_t *record,
+	const gnss_calendar_time_t *utc_frame_time,
+	uint8_t *previous_relative_bit,
 	int8_t symbols[GLONASS_GNAV_FRAME_SYMBOLS])
 {
 	glonass_gnav_immediate_t immediate;
 	glonass_gnav_string5_t time_data={0};
 	glonass_gnav_almanac_t almanacs[5];
-	uint8_t frame[15][85],previous=0U;
+	uint8_t frame[15][85];
 	unsigned int index;
-	if(record==NULL || symbols==NULL ||
+	if(record==NULL || utc_frame_time==NULL || previous_relative_bit==NULL ||
+		*previous_relative_bit>1U || symbols==NULL ||
 		gnss_glonass_gnav_from_rinex(record,&immediate)!=0) return -1;
-	if(glonass_calendar_fields(&record->toc,&time_data.na,&time_data.n4)!=0)
+	if(gnss_glonass_gnav_apply_frame_time(&immediate,&time_data,
+		utc_frame_time)!=0)
 		return -1;
 	memset(almanacs,0,sizeof(almanacs));
 	for(index=0U;index<5U;index++) {
@@ -159,7 +150,7 @@ int gnss_schedule_glonass(const gnss_nav_record_t *record,
 	}
 	if(gnss_glonass_gnav_frame(&immediate,&time_data,almanacs,frame)!=0) return -1;
 	for(index=0U;index<15U;index++)
-		if(gnss_glonass_l1of_symbols(frame[index],&previous,
+		if(gnss_glonass_l1of_symbols(frame[index],previous_relative_bit,
 			symbols+index*GLONASS_L1OF_STRING_SYMBOLS)!=0) return -1;
 	return 0;
 }
