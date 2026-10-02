@@ -20,7 +20,7 @@ from `-e` or automatic download.
 | Option | Argument | Accepted values | Default | Effect and interactions |
 | --- | --- | --- | --- | --- |
 | `-S` | profile | `gps-l1ca`, `galileo-e1`, `beidou-b1i`, `glonass-l1of`, `mixed-open` | `gps-l1ca` | Selects signal metadata, parser routing, navigation backend, modulation, and RF defaults. Unknown/unimplemented profiles fail before hardware opens. |
-| `-L` | none | — | off | Prints registered profiles and implementation state, then exits successfully. Other run options are ignored because no scenario starts. |
+| `-L` | none | — | off | Prints each profile's description, carrier, minimum waveform span, default sample rate, default analog filter, and implementation state, then exits successfully. Other run options are ignored because no scenario starts. |
 | `-e` | path | Existing plain RINEX; POSIX also accepts `.gz`/`.Z` | automatic download | Navigation path, maximum 99 characters. RINEX family must match the chosen service. |
 | `-t` | date,time | `YYYY/MM/DD,hh:mm:ss`, year > 1980, valid date, hour 0–23, minute 0–59, second `[0,60)` | first matching ephemeris epoch; current UTC date for download | Sets scenario time and automatic-download date. Fractional seconds are accepted syntactically and floored to an integer second. |
 | `-d` | seconds | finite decimal, `0 < d <= 86400` | 86400 seconds | Rounded to the nearest 100 ms step as `floor(d*10 + 0.5)`. |
@@ -33,7 +33,7 @@ from `-e` or automatic download.
 | `-D` | identifier | libbladeRF device selector string | first matching device | Passed to `bladerf_open`; maximum 99 characters. |
 | `-f` | hertz | unsigned integer 1–`UINT_MAX` | profile carrier/plan center | Requested TX complex center frequency. Must contain the complete profile span at the chosen sample rate. Hardware must reproduce it exactly. |
 | `-r` | samples/s | integer 1,000,000–100,000,000 and divisible by 10 | profile minimum | Exact TX complex sample rate. Divisibility by 10 guarantees an integral 100 ms producer block. Hardware coercion is rejected. |
-| `-b` | hertz | unsigned integer 1–`UINT_MAX` | profile recommendation | Requested analog TX bandwidth. It must contain the complete offset signal and may not exceed sample rate. Hardware quantization is accepted only if the realized value remains safe. |
+| `-b` | hertz | unsigned integer 1–`UINT_MAX` | profile recommendation | Requested analog TX filter bandwidth. It must contain the complete offset waveform span and may not exceed sample rate. Hardware quantization is accepted only if set-result and read-back agree and the realized value remains safe. |
 | `-G` | dB | integer -200–200, then constrained by device | 27 dB | Portable overall TX gain. Mutually exclusive with `-a`/`-A`; it is relative gain, not calibrated RF power. |
 | `-a` | dB | integer -100–100, then constrained by stage | -25 dB | Legacy bladeRF 1 `txvga1`. Must be paired with `-A`; cannot be combined with `-G`. |
 | `-A` | dB | integer -100–100, then constrained by stage | 0 dB | Legacy bladeRF 1 `txvga2`. Must be paired with `-a`; cannot be combined with `-G`. |
@@ -46,24 +46,26 @@ can add live movement to that base position.
 
 ## Profile defaults
 
-| Profile | Center frequency | Sample rate | Analog bandwidth | Maximum advertised SV number | FDMA |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `gps-l1ca` | 1,575,420,000 Hz | 2,600,000 sps | 2,500,000 Hz | 37 | No |
-| `galileo-e1` | 1,575,420,000 Hz | 36,828,000 sps | 24,552,000 Hz | 36 | No |
-| `beidou-b1i` | 1,561,098,000 Hz | 5,000,000 sps | 4,500,000 Hz | 63 | No |
-| `glonass-l1of` | 1,602,000,000 Hz nominal | 12,000,000 sps | 10,000,000 Hz | 24 | Slots -7…+6 |
-| `mixed-open` | 1,582,392,500 Hz | 48,000,000 sps | 47,100,000 Hz | per service | Yes |
+| Profile | Center frequency | Minimum waveform span | Sample rate | Analog filter | Maximum advertised SV number | FDMA |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `gps-l1ca` | 1,575,420,000 Hz | 2,250,600 Hz | 2,600,000 sps | 2,500,000 Hz | 37 | No |
+| `galileo-e1` | 1,575,420,000 Hz | 24,552,000 Hz | 36,828,000 sps | 28,000,000 Hz | 36 | No |
+| `beidou-b1i` | 1,561,098,000 Hz | 4,501,200 Hz | 5,000,000 sps | 5,000,000 Hz | 63 | No |
+| `glonass-l1of` | 1,602,000,000 Hz nominal | 8,999,200 Hz | 12,000,000 sps | 10,000,000 Hz | 24 | Slots -7…+6 |
+| `mixed-open` | 1,582,392,500 Hz | 47,100,000 Hz | 50,000,000 sps | 48,000,000 Hz | per service | Yes |
 
-CLI overrides do not change the simulated signal's defined carrier or occupied
-bandwidth. They change the SDR tuning/filter plan and must still contain the
-registered signal.
+CLI overrides do not change the simulated signal's defined carrier or minimum
+waveform span. They change the SDR tuning/filter plan and must still contain the
+registered signal. The default analog filter is deliberately wider than the
+minimum waveform span to allow Doppler, transition-band, and device-quantization
+margin without making the allocator treat that guard as emitted occupancy.
 
 ## RF-plan equations
 
 For one registered carrier, required complex/analog span is:
 
 ```text
-required_bandwidth = occupied_bandwidth
+required_bandwidth = minimum_waveform_span
                    + 2 * abs(signal_carrier - tx_center)
 ```
 
@@ -76,7 +78,10 @@ analog_bandwidth   <= sample_rate
 ```
 
 Per-satellite GLONASS FDMA carriers receive an additional allocator passband
-check. The hardware layer then repeats validation against realized values.
+check. The hardware layer then repeats validation against realized center,
+sample-rate, and filter values. Frequency and sample rate must read back exactly;
+filter quantization is accepted only when the returned and queried values agree
+and remain large enough.
 
 ## Runtime and exit behavior
 

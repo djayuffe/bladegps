@@ -200,8 +200,14 @@ static void test_signal_profiles(void)
 	assert(gnss_signal_profile(signal)->system == GNSS_SYSTEM_GALILEO);
 	assert(gnss_signal_profile(signal)->minimum_sample_rate_hz==
 		GNSS_GALILEO_E1_SAMPLE_RATE_HZ);
+	assert(gnss_signal_profile(signal)->occupied_bandwidth_hz==
+		GNSS_GALILEO_E1_REFERENCE_BANDWIDTH_HZ);
+	assert(gnss_signal_profile(signal)->recommended_bandwidth_hz==28.0e6);
 	assert(gnss_signal_parse("mixed-open",&signal)==0);
-	assert(signal==GNSS_SIGNAL_MIXED_OPEN&&gnss_signal_profile(signal)->minimum_sample_rate_hz==48.0e6);
+	assert(signal==GNSS_SIGNAL_MIXED_OPEN&&
+		gnss_signal_profile(signal)->minimum_sample_rate_hz==50.0e6&&
+		gnss_signal_profile(signal)->occupied_bandwidth_hz==47.1e6&&
+		gnss_signal_profile(signal)->recommended_bandwidth_hz==48.0e6);
 	assert(gnss_signal_parse("invalid", &signal) == -1);
 	assert(gnss_frequency_fits(1575.42e6, 5.0e6, 1575.42e6, 4.0e6));
 	assert(!gnss_frequency_fits(1575.42e6, 5.0e6, 1561.098e6, 4.5e6));
@@ -257,14 +263,20 @@ static void test_bladerf_hardware_helpers(void)
 	assert(blade_hw_validate_stream_geometry(32U, 32768U, 16U) == 0);
 	assert(blade_hw_validate_stream_geometry(16U, 32768U, 16U) == -1);
 	assert(blade_hw_validate_stream_geometry(32U, 32767U, 16U) == -1);
+	assert(blade_hw_validate_transport(BLADERF_DEVICE_SPEED_SUPER,50000000U)==0);
+	assert(blade_hw_validate_transport(BLADERF_DEVICE_SPEED_HIGH,12000000U)==0);
+	assert(blade_hw_validate_transport(BLADERF_DEVICE_SPEED_HIGH,15000000U)==-1);
+	assert(blade_hw_validate_transport(BLADERF_DEVICE_SPEED_UNKNOWN,50000000U)==0);
+	assert(blade_hw_validate_transport(BLADERF_DEVICE_SPEED_SUPER,0U)==-1);
 	for (signal = 0; signal < GNSS_SIGNAL_COUNT; signal++) {
 		const gnss_signal_profile_t *profile =
 			gnss_signal_profile((gnss_signal_t)signal);
 		assert(profile != NULL);
 		assert(blade_hw_validate_rf_plan(profile->carrier_hz,
-			profile->carrier_hz, profile->recommended_bandwidth_hz,
+			profile->carrier_hz, profile->occupied_bandwidth_hz,
 			profile->minimum_sample_rate_hz,
 			profile->recommended_bandwidth_hz) == 0);
+		assert(profile->recommended_bandwidth_hz>=profile->occupied_bandwidth_hz);
 	}
 	blade_hw_measure_samples(iq, 3U, &stats);
 	assert(stats.complex_samples == 3U);
@@ -274,6 +286,7 @@ static void test_bladerf_hardware_helpers(void)
 
 static void test_rf_renderer_and_allocator(void)
 {
+	enum { LONG_RENDER_SAMPLES = 8201, LONG_SPLIT_SAMPLES = 4177 };
 	static const int8_t code[4] = {1,-1,1,-1};
 	static const int8_t data[3] = {1,1,-1};
 	static const int8_t overlay[2] = {1,-1};
@@ -295,6 +308,7 @@ static void test_rf_renderer_and_allocator(void)
 		{GNSS_SYSTEM_GPS,6U,1575.42e6,2.5e6,0.60,1}
 	};
 	int16_t one_block[200], split_blocks[200];
+	int16_t *long_block, *long_split;
 	size_t selected[2], selected_count=0U;
 	gnss_rf_channel_t bank[2]={{0}},desired[2];
 
@@ -304,6 +318,30 @@ static void test_rf_renderer_and_allocator(void)
 	assert(memcmp(one_block,split_blocks,sizeof(one_block))==0);
 	assert(whole.carrier_phase==split.carrier_phase && whole.code_phase==split.code_phase &&
 		whole.data_phase==split.data_phase && whole.overlay_phase==split.overlay_phase);
+	/* Cross the oscillator's periodic 4096-sample phase re-anchor and split at
+	 * an unrelated boundary. Streaming output must remain block-size invariant. */
+	whole=(gnss_rf_channel_t){
+		.enabled=1,.modulation=GNSS_RF_BPSK,.system=GNSS_SYSTEM_GPS,.prn=1U,
+		.carrier_hz=10000000.0,.doppler_hz=137.25,.amplitude=700.0,
+		.data_code=code,.code_length=4U,.code_rate_hz=1000.0,.code_phase=1.25,
+		.data_symbols=data,.data_symbol_count=3U,.data_rate_hz=50.0,.data_phase=0.75,
+		.overlay_symbols=overlay,.overlay_symbol_count=2U,.overlay_rate_hz=25.0,
+		.overlay_phase=0.25,.carrier_phase=0.125
+	};
+	split=whole;
+	long_block=malloc((size_t)LONG_RENDER_SAMPLES*2U*sizeof(*long_block));
+	long_split=malloc((size_t)LONG_RENDER_SAMPLES*2U*sizeof(*long_split));
+	assert(long_block!=NULL && long_split!=NULL);
+	assert(gnss_rf_render(&whole,1U,10000000.0,1000000.0,long_block,LONG_RENDER_SAMPLES)==0);
+	assert(gnss_rf_render(&split,1U,10000000.0,1000000.0,long_split,LONG_SPLIT_SAMPLES)==0);
+	assert(gnss_rf_render(&split,1U,10000000.0,1000000.0,
+		long_split+(size_t)LONG_SPLIT_SAMPLES*2U,
+		LONG_RENDER_SAMPLES-LONG_SPLIT_SAMPLES)==0);
+	assert(memcmp(long_block,long_split,
+		(size_t)LONG_RENDER_SAMPLES*2U*sizeof(*long_block))==0);
+	assert(whole.carrier_phase==split.carrier_phase && whole.code_phase==split.code_phase &&
+		whole.data_phase==split.data_phase && whole.overlay_phase==split.overlay_phase);
+	free(long_split);free(long_block);
 	split=whole; split.data_rate_hz=NAN;
 	assert(gnss_rf_validate_channel(&split,10000000.0,1000000.0)==-1);
 	split=whole; split.modulation=(gnss_rf_modulation_t)99;

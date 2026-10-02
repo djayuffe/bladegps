@@ -13,7 +13,8 @@ legacy daily navigation file; the other profiles auto-download or accept `-e`
 with mixed RINEX 3/4.
 
 `-S mixed-open` activates one joint production loop for all four systems. It
-uses a 48 Msps/47.1 MHz default span, constellation-native transmit time, and a
+uses a 50 Msps stream, 47.1 MHz minimum waveform span, 48 MHz analog filter,
+constellation-native transmit time, and a
 single elevation-ranked 16-channel bank. Unsupported hardware bandwidth fails
 before transmission.
 
@@ -26,13 +27,15 @@ before transmission.
 | Ranging-code generator | Implemented | All 50 official E1-B/C primary codes, memory-code decoder, and CBOC primitives implemented | B1I generator implemented for PRN 1-63 | L1OF generator implemented |
 | Navigation message | GPS LNAV | I/NAV ephemeris words 1-4 and word 5 with RINEX health/BGD, correct GST week/TOW, CRC-24Q, convolutional coding, interleaving, sync/SSP, and 30-second rescheduling; unavailable optional service/almanac/FEC2 slots use the ICD dummy word instead of false zero-valued content | D1 subframes 1-3, D2 GEO basic pages 1-10, RINEX 3/4 Klobuchar coefficients, BCH/interleaving, headers and rollover; library almanac builders are available, while service subframes not supplied by ephemeris/ION input are emitted as encoded reserved payloads | Immediate strings 1-4 and calendar-derived string 5, Hamming protection, relative/meander/time-mark symbols; almanac pairs absent from an FDMA ephemeris record are explicitly marked non-operational |
 | Modulation/mixer | Production BPSK(1) | Production E1-B/E1-C CBOC with continuous code/data/pilot-secondary/carrier phase | Production BPSK with D1 NH overlay and D2 500 bit/s scheduling | Production relative-code/meander/time-mark formatting and per-slot continuous-phase FDMA |
-| Hardware validation | Requires local shielded lab | Not implemented | Not implemented | Not implemented |
+| Hardware configuration/read-back | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required | Implemented; shielded receiver validation required |
 
 ## Core separation
 
 The simulator is divided into layers that must remain constellation-aware:
 
-1. `gnss.c` owns immutable signal metadata: constellation, carrier plan, code rate, code length, minimum sample rate, occupied bandwidth, satellite limit, FDMA/CDMA behavior, and implementation status.
+1. `gnss.c` owns immutable signal metadata: constellation, carrier plan, code
+   rate, code length, minimum sample rate, minimum waveform span, recommended
+   analog filter, satellite limit, FDMA/CDMA behavior, and implementation status.
 2. The CLI selects a profile and obtains safe RF defaults. User overrides are checked to ensure the entire signal fits inside the complex sampled passband.
 3. The navigation layer parses GPS RINEX 2 and supported RINEX 3/4 mixed-system
    ephemeris dynamically, skips unrelated record families without
@@ -64,10 +67,12 @@ the overlay; D2 omits the NH overlay and uses its 500 bit/s stream directly.
 GLONASS GNAV strings are differentially encoded, modulo-2 combined with the
 100 Hz auxiliary meander for 1.7 seconds, and followed by the 30-chip time mark.
 
-The standalone Galileo E1 profile uses the ICD 24.552 MHz receiver reference
-bandwidth as its analog bandwidth and a 36.828 Msps complex sample rate. This
+The standalone Galileo E1 profile preserves the ICD 24.552 MHz receiver
+reference bandwidth as its minimum waveform span, requests a 28 MHz analog
+filter, and uses a 36.828 Msps complex sample rate. This
 provides 36 samples per 1.023 Mcps code chip—three samples for each of the
-twelve CBOC subchips—while retaining digital passband margin for Doppler. It
+twelve CBOC subchips—while retaining digital and analog passband margin for
+Doppler and device filter quantization. It
 avoids aliasing the 6.138 MHz BOC(6,1) component into the old 4.092 Msps
 approximation.
 

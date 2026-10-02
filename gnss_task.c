@@ -272,7 +272,7 @@ void *gnss_task(void *argument)
 			(records[best[system][n]].system==GNSS_SYSTEM_GLONASS?1800.0:14400.0)){
 			size_t record_index=best[system][n];gnss_signal_t signal=record_signal(&records[record_index]);
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
-			double carrier=channel_profile->carrier_hz,occupied=channel_profile->recommended_bandwidth_hz;
+			double carrier=channel_profile->carrier_hz,occupied=channel_profile->occupied_bandwidth_hz;
 			if(signal==GNSS_SIGNAL_GLONASS_L1OF){double raw_slot=records[record_index].orbit[7];int slot;
 				long long rounded_slot;
 				if(!isfinite(raw_slot))continue;

@@ -34,7 +34,8 @@ helpers are implementation details and are described by responsibility in
 | `carrier_hz` | Nominal carrier or mixed-plan center. |
 | `code_rate_hz`, `code_length` | Primary spreading-code clock and period. |
 | `minimum_sample_rate_hz` | Default complex sample rate. |
-| `recommended_bandwidth_hz` | Default occupied/analog bandwidth plan. |
+| `occupied_bandwidth_hz` | Minimum waveform/reference span used by passband validation and allocation. |
+| `recommended_bandwidth_hz` | Default analog TX filter, including profile guard margin. |
 | `maximum_sv` | Highest runtime satellite identifier for that profile. |
 | `fdma` | Non-zero when individual carriers must be considered. |
 | `waveform_implemented` | Non-zero only for executable production profiles. |
@@ -48,7 +49,7 @@ helpers are implementation details and are described by responsibility in
 | `gnss_system_name(system)` | Maps enum to display text. | Static name; `"Unknown"` for invalid input. |
 | `gnss_signal_parse(name, signal)` | Parses an exact profile name into `*signal`. | 0 or -1. |
 | `gnss_frequency_fits(center, sample_rate, carrier, occupied_bw)` | Tests `abs(carrier-center)+occupied_bw/2 <= sample_rate/2`; all inputs must be finite/positive as applicable. | Boolean 1/0. |
-| `gnss_print_signal_profiles()` | Prints every profile, system, MHz carrier, and implementation state to stdout. | `void`. |
+| `gnss_print_signal_profiles()` | Prints every profile, description, system, carrier, waveform span, default sample/filter settings, and implementation state. | `void`. |
 
 ## Time conversion — `gnss_time.h`
 
@@ -192,7 +193,7 @@ Each function validates record family/fields and returns 0/-1.
 | `gnss_rf_bits_to_symbols(bits, count, symbols)` | Converts bit 0→+1 and bit 1→-1. |
 | `gnss_glonass_l1of_symbols(string, previous, symbols)` | Differentially encodes one 85-bit string, applies the 100 Hz meander for 170 symbols, appends 30 time-mark chips, and updates cross-string state. |
 | `gnss_rf_validate_channel(channel, center, sample_rate)` | Validates identity, finite/ranged phases/rates, ±1 buffers, modulation-specific pilot requirements, and sampled-passband fit. |
-| `gnss_rf_render(channels, count, center, sample_rate, iq, samples)` | Validates enabled channels, computes deterministic bank normalization, renders BPSK or E1 CBOC, advances every phase, and writes saturated interleaved SC16 Q11. |
+| `gnss_rf_render(channels, count, center, sample_rate, iq, samples)` | Validates enabled channels, computes deterministic bank normalization, renders BPSK or E1 CBOC with phase-anchored complex carrier oscillators, advances every phase, and writes saturated interleaved SC16 Q11. Oscillators are periodically re-anchored to canonical phase to bound recurrence drift without per-sample trigonometry. |
 | `gnss_rf_allocate(candidates, count, center, rate, mask, selected, capacity, selected_count)` | Filters unhealthy/below-mask/out-of-band candidates and returns indices in descending elevation, capped by capacity. |
 | `gnss_rf_reconcile(active, capacity, desired, count)` | Rebuilds a unique channel bank and preserves carrier/code/data/overlay phases for unchanged identities. |
 
@@ -206,9 +207,10 @@ test validator, not a real-time navigation receiver. Returns 0/-1.
 
 ## bladeRF hardware adapter — `blade_hw.h`
 
-`blade_hw_config_t` is the requested frequency/sample/bandwidth/signal span,
-gain mode, and XB board. `blade_hw_result_t` records realized RF settings and
-board name. `blade_sample_stats_t` accumulates complex-sample count, component
+`blade_hw_config_t` is the requested frequency/sample/filter/signal span,
+gain mode, and XB board. `blade_hw_result_t` records realized RF settings, TX
+channel count, USB device speed, and board name. `blade_sample_stats_t`
+accumulates complex-sample count, component
 rail contacts, and peak absolute component.
 
 | Function | Contract |
@@ -217,7 +219,8 @@ rail contacts, and peak absolute component.
 | `blade_hw_required_bandwidth(center, carrier, occupied)` | Returns `occupied + 2×abs(carrier-center)` or `NAN`. |
 | `blade_hw_validate_rf_plan(center, carrier, occupied, sample_rate, bandwidth)` | Requires finite positive values, required span within both sample/analog bandwidth, and analog bandwidth no wider than sample rate. |
 | `blade_hw_validate_stream_geometry(buffers, size, transfers)` | Requires non-zero values, buffer size multiple of 1024, and `buffers > transfers`. |
-| `blade_hw_configure_tx(dev, config, result)` | Requires configured FPGA, validates device ranges, exact frequency/rate read-back, safe realized bandwidth, gain, and optional XB200 TX setup. Returns libbladeRF status. |
+| `blade_hw_validate_transport(speed, sample_rate)` | Rejects zero rates and SC16 Q11 rates at or above the raw 15 Msps USB High-Speed payload ceiling; SuperSpeed and unknown links remain subject to device range/read-back checks. |
+| `blade_hw_configure_tx(dev, config, result)` | Validates the plan before mutation; requires configured FPGA and a TX channel; reports USB speed; disables/verifies loopback; validates ranges; requires exact frequency/rate read-back; requires bandwidth set-result/read-back agreement and a safe realized filter; configures gain; and optionally attaches/verifies XB200 bypass/automatic filtering. Returns libbladeRF status. |
 | `blade_hw_measure_samples(iq, count, stats)` | Accumulates sample count, max absolute component, and values touching/exceeding Q11 rails. |
 
 ## Motion controller — `motion_controller.h`
@@ -304,5 +307,5 @@ are important during audits:
 | `gnss_orbit.c` | Week wrapping, civil-day conversion, constellation constants, Kepler iteration, GLONASS acceleration/RK4. |
 | `gnss_geometry.c` | Group-delay selection, Earth-rotation transform, line-of-sight and local-angle calculation. |
 | navigation modules | Bit insertion, signed/unsigned width checks, physical-to-LSB quantization, calendar/schedule helpers. |
-| `gnss_rf.c` | Symbol validation, modular phase advancement, Q11 saturation, signal identity comparison. |
+| `gnss_rf.c` | Symbol validation, modular phase advancement, phase-anchored carrier recurrence, Q11 saturation, signal identity comparison. |
 | `blade_hw.c` | Scaled hardware ranges, API error reporting, XB200 setup, named legacy gain-stage handling. |

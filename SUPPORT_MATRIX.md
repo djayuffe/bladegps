@@ -19,13 +19,13 @@ GNSS authority or measured with calibrated RF equipment.
 
 ## Executable signal profiles
 
-| CLI profile | Service | Carrier plan | Primary code | Navigation rate | Default sample rate | Default analog bandwidth | Production status |
+| CLI profile | Service | Carrier plan | Primary code | Navigation rate | Waveform span | Default sample/filter | Production status |
 | --- | --- | ---: | --- | ---: | ---: | ---: | --- |
-| `gps-l1ca` | GPS L1 C/A + LNAV | 1575.42 MHz CDMA | 1023 chips at 1.023 Mcps | 50 bit/s | 2.6 Msps | 2.5 MHz | Implemented |
-| `galileo-e1` | Galileo E1-B data + E1-C pilot, I/NAV | 1575.42 MHz CDMA | 4092 chips at 1.023 Mcps | 250 symbol/s after coding | 36.828 Msps | 24.552 MHz reference bandwidth | Implemented; optional I/NAV content is partial |
-| `beidou-b1i` | BeiDou B1I D1/D2 | 1561.098 MHz CDMA | 2046 chips at 2.046 Mcps | D1 50 bit/s; D2 500 bit/s | 5.0 Msps | 4.5 MHz | Implemented; optional service/almanac content is partial |
-| `glonass-l1of` | GLONASS L1OF + GNAV | 1602 MHz + `k × 562.5 kHz`, `k=-7…+6` | 511 chips at 0.511 Mcps | 50 bit/s before 100 Hz meander | 12.0 Msps | 10.0 MHz | Implemented; unavailable almanac is marked non-operational |
-| `mixed-open` | All four services above | 1582.3925 MHz plan center | Per-service | Per-service | 48.0 Msps | 47.1 MHz | Implemented when hardware covers the complete span |
+| `gps-l1ca` | GPS L1 C/A + LNAV | 1575.42 MHz CDMA | 1023 chips at 1.023 Mcps | 50 bit/s | 2.2506 MHz | 2.6 Msps / 2.5 MHz | Implemented |
+| `galileo-e1` | Galileo E1-B data + E1-C pilot, I/NAV | 1575.42 MHz CDMA | 4092 chips at 1.023 Mcps | 250 symbol/s after coding | 24.552 MHz reference | 36.828 Msps / 28 MHz | Implemented; optional I/NAV content is partial |
+| `beidou-b1i` | BeiDou B1I D1/D2 | 1561.098 MHz CDMA | 2046 chips at 2.046 Mcps | D1 50 bit/s; D2 500 bit/s | 4.5012 MHz | 5.0 Msps / 5.0 MHz | Implemented; optional service/almanac content is partial |
+| `glonass-l1of` | GLONASS L1OF + GNAV | 1602 MHz + `k × 562.5 kHz`, `k=-7…+6` | 511 chips at 0.511 Mcps | 50 bit/s before 100 Hz meander | 8.9992 MHz full plan | 12.0 Msps / 10.0 MHz | Implemented; unavailable almanac is marked non-operational |
+| `mixed-open` | All four services above | 1582.3925 MHz plan center | Per-service | Per-service | 47.1 MHz | 50.0 Msps / 48.0 MHz | Implemented when hardware covers the complete span |
 
 The runtime has sixteen RF channel slots shared by all visible satellites. In
 `mixed-open`, allocation is global rather than four independent per-system
@@ -123,12 +123,14 @@ not silently continue with a frozen motion command.
 | Capability | Status | Boundary |
 | --- | --- | --- |
 | bladeRF 1 and bladeRF 2 capability queries | Implemented | Depends on installed libbladeRF and connected hardware. |
+| TX channel and USB-speed discovery | Implemented | At least one TX channel is required; link speed is reported for throughput diagnosis. |
+| Loopback disable/read-back | Implemented | RF output requires `BLADERF_LB_NONE`; configuration fails if it cannot be verified. |
 | Exact center-frequency read-back | Required | A coerced value is rejected. |
 | Exact sample-rate read-back | Required | A coerced value is rejected because it changes signal timing. |
-| Analog-bandwidth read-back | Validated | Quantization is accepted only if the realized filter contains the full signal span. |
+| Analog-bandwidth set-result/read-back | Validated | Both values must agree; quantization is accepted only if the realized filter contains the full signal span and does not exceed sample rate. |
 | Portable overall TX gain | Implemented | Relative setting, not calibrated output power. |
 | Legacy TXVGA1/TXVGA2 controls | Implemented for compatible bladeRF 1 hardware | Both must be supplied together. |
-| XB200 TX path | Implemented | L-band bypass/automatic low-loss selection; RX is not changed. |
+| XB200 TX path | Implemented | Attachment, L-band bypass, and automatic 1 dB filter selection are read back; RX is not changed. |
 | SC16 Q11 output | Implemented | Interleaved signed 16-bit I/Q using the bladeRF Q11 range. |
 | Whole-bank deterministic normalization | Implemented | Keeps a fixed channel-bank scale with headroom; no block AGC pumping. |
 | Peak and rail telemetry | Implemented | Reported for submitted TX buffers. |

@@ -293,6 +293,11 @@ For each 100 ms block:
 
 Carrier, code, navigation-data, and secondary/NH clocks are continuous across
 blocks. Code/data/overlay clocks use one Doppler scale per satellite. The mixer
+initializes one complex carrier oscillator per enabled channel and advances it
+with a complex rotation in the sample hot path. It periodically re-anchors each
+oscillator from the channel's canonical phase, bounding floating-point drift
+without restoring per-sample `sin()`/`cos()` cost. Output and all phases remain
+invariant when the same interval is rendered using different block splits. It
 computes a deterministic whole-bank peak bound and applies one fixed headroom
 scale for the bank, avoiding block-by-block AGC pumping.
 
@@ -308,17 +313,28 @@ primitives where those remain authoritative in this codebase.
 `main()` builds a hardware request from the selected signal profile and optional
 CLI overrides. `blade_hw_configure_tx()` applies it in this order:
 
-1. Identify the board and require a configured FPGA.
-2. Configure optional XB200 TX-only native L-band bypass and automatic filter selection.
-3. Query the live frequency range, tune, and require exact read-back.
-4. Query the live sample-rate range, configure it, and reject timing-changing coercion.
-5. Query/configure analog bandwidth and validate the realized filter width against `occupied bandwidth + 2 * abs(carrier - center)`.
-6. Apply generic overall gain, or explicitly requested bladeRF 1.0 named stages, after tuning because valid gain ranges can depend on frequency.
+1. Validate the requested RF plan before changing hardware.
+2. Identify the board, require a configured FPGA and TX channel, report USB
+   speed, and reject SC16 Q11 rates at or above the nominal USB High-Speed
+   payload ceiling before mutating hardware.
+3. Disable loopback and verify that RF output routing is active.
+4. Configure optional XB200 TX-only native L-band bypass/automatic filtering and verify attachment, path, and filter read-back.
+5. Query the live frequency range, tune, and require exact read-back.
+6. Query the live sample-rate range, configure it, and require set-result/get-result agreement with no timing-changing coercion.
+7. Query/configure analog bandwidth, require set-result/get-result agreement, and validate the realized filter width against `minimum waveform span + 2 * abs(carrier - center)`.
+8. Apply generic overall gain, or explicitly requested bladeRF 1.0 named stages, after tuning because valid gain ranges can depend on frequency.
 
 libbladeRF range structures are interpreted using `value * scale`. Ranges are
 queried from the open device rather than cached, allowing one binary to adapt
 to bladeRF 1.0 and 2.0 hardware. The analog bandwidth must contain the whole
 modulated signal and must not exceed the complex sample rate.
+
+The registry stores minimum waveform span separately from recommended analog
+filter width. The allocator therefore sees actual waveform occupancy, while the
+hardware receives a wider profile-specific filter with transition, Doppler, and
+quantization margin. `mixed-open` uses a 47.1 MHz minimum span, 48 MHz filter,
+and 50 Msps stream; Galileo E1 uses the 24.552 MHz reference span with a 28 MHz
+filter at 36.828 Msps.
 
 ADC setup is intentionally absent because bladeGPS never enables RX. The TX
 equivalent concern is DAC input integrity, handled through SC16 Q11 peak and

@@ -36,6 +36,7 @@ typedef struct {
 	double code_rate_hz;
 	uint32_t code_length;
 	double minimum_sample_rate_hz;
+	double occupied_bandwidth_hz;
 	double recommended_bandwidth_hz;
 	uint32_t maximum_sv;
 	int fdma;

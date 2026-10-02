@@ -544,7 +544,9 @@ void usage(void)
 		"  -A <dB>          Legacy bladeRF 1 TXVGA2 gain (requires -a)\n"
 		"  -M <degrees>     Satellite elevation mask (-90 to 90)\n"
 		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c', Up='%c', Down='%c'\n"
-		"  -j <index>       Live SDL USB/Bluetooth game controller index (left stick NE, right stick up/down)\n",
+		"  -j <index>       Live SDL USB/Bluetooth game controller index (left stick NE, right stick up/down)\n"
+		"Profile-safe center, sample-rate, and filter defaults are used unless -f/-r/-b override them.\n"
+		"See USER_GUIDE.md and CLI_REFERENCE.md for hardware limits, formats, and examples.\n",
 		((double)USER_MOTION_SIZE)/10.0, DEFAULT_TX_GAIN,
 		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY, UP_KEY, DOWN_KEY);
 
@@ -785,13 +787,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	if (!gnss_frequency_fits((double)s.opt.tx_frequency, (double)s.opt.tx_sample_rate,
-		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz)) {
+		signal_profile->carrier_hz, signal_profile->occupied_bandwidth_hz)) {
 		fprintf(stderr, "ERROR: Selected sample rate/center frequency does not contain the %s signal.\n",
 			signal_profile->name);
 		return 1;
 	}
 	if (blade_hw_validate_rf_plan((double)s.opt.tx_frequency,
-		signal_profile->carrier_hz, signal_profile->recommended_bandwidth_hz,
+		signal_profile->carrier_hz, signal_profile->occupied_bandwidth_hz,
 		(double)s.opt.tx_sample_rate, (double)s.opt.tx_bandwidth) != 0) {
 		fprintf(stderr, "ERROR: TX analog bandwidth must contain the complete signal span and not exceed the sample rate.\n");
 		return 1;
@@ -859,7 +861,7 @@ int main(int argc, char *argv[])
 	hw_config.sample_rate_hz = s.opt.tx_sample_rate;
 	hw_config.bandwidth_hz = s.opt.tx_bandwidth;
 	hw_config.signal_carrier_hz = signal_profile->carrier_hz;
-	hw_config.occupied_bandwidth_hz = signal_profile->recommended_bandwidth_hz;
+	hw_config.occupied_bandwidth_hz = signal_profile->occupied_bandwidth_hz;
 	hw_config.gain_db = s.opt.tx_gain;
 	hw_config.use_legacy_gain = tx_vga1_set && tx_vga2_set;
 	hw_config.txvga1_db = s.opt.tx_vga1;
@@ -899,7 +901,7 @@ int main(int argc, char *argv[])
 
 	// Configure the TX module for use with the synchronous interface.
 	s.status = bladerf_sync_config(s.tx.dev,
-			BLADERF_MODULE_TX,
+			BLADERF_TX_X1,
 			BLADERF_FORMAT_SC16_Q11,
 			NUM_BUFFERS,
 			SAMPLES_PER_BUFFER,

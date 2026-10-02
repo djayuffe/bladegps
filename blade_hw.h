@@ -23,6 +23,8 @@ typedef struct {
 	unsigned int sample_rate_hz;
 	unsigned int bandwidth_hz;
 	int gain_db;
+	size_t tx_channel_count;
+	bladerf_dev_speed device_speed;
 	char board_name[32];
 } blade_hw_result_t;
 
@@ -39,6 +41,8 @@ int blade_hw_validate_rf_plan(double center_hz, double carrier_hz,
 	double occupied_bandwidth_hz, double sample_rate_hz, double bandwidth_hz);
 int blade_hw_validate_stream_geometry(unsigned int num_buffers,
 	unsigned int buffer_size, unsigned int num_transfers);
+int blade_hw_validate_transport(bladerf_dev_speed speed,
+	unsigned int sample_rate_hz);
 int blade_hw_configure_tx(struct bladerf *dev, const blade_hw_config_t *config,
 	blade_hw_result_t *result);
 void blade_hw_measure_samples(const int16_t *iq, size_t complex_samples,

@@ -9,6 +9,13 @@
 
 #define TWO_PI 6.28318530717958647693
 
+typedef struct {
+	double i;
+	double q;
+	double rotate_i;
+	double rotate_q;
+} rf_oscillator_t;
+
 static int symbols_valid(const int8_t *symbols, size_t count)
 {
 	size_t index;
@@ -67,14 +74,23 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 {
 	size_t channel,sample;
 	double normalization=1.0,peak_bound=0.0;
+	rf_oscillator_t *oscillators;
 	if(channels==NULL || count==0U || iq==NULL || samples==0U ||
 		!isfinite(center) || !isfinite(sample_rate) || sample_rate<=0.0 ||
-		samples>SIZE_MAX/(2U*sizeof(*iq))) return -1;
+		samples>SIZE_MAX/(2U*sizeof(*iq)) || count>SIZE_MAX/sizeof(*oscillators)) return -1;
+	oscillators=calloc(count,sizeof(*oscillators));
+	if(oscillators==NULL)return -1;
 	for(channel=0U;channel<count;channel++) if(channels[channel].enabled) {
-		if(gnss_rf_validate_channel(&channels[channel],center,sample_rate)!=0)return -1;
+		double phase_step;
+		if(gnss_rf_validate_channel(&channels[channel],center,sample_rate)!=0){free(oscillators);return -1;}
 		peak_bound+=channels[channel].amplitude*
 			(channels[channel].modulation==GNSS_RF_GALILEO_E1?
 				(sqrt(2.0)*sqrt(10.0/11.0)):1.0);
+		phase_step=TWO_PI*(channels[channel].carrier_hz+channels[channel].doppler_hz-center)/sample_rate;
+		oscillators[channel].i=cos(channels[channel].carrier_phase);
+		oscillators[channel].q=sin(channels[channel].carrier_phase);
+		oscillators[channel].rotate_i=cos(phase_step);
+		oscillators[channel].rotate_q=sin(phase_step);
 	}
 	/* Preserve at least 1 dB of deterministic headroom in SC16 Q11.  The
 	 * scale is fixed for a channel bank, so it cannot introduce AGC pumping. */
@@ -84,7 +100,8 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 		double i=0.0,q=0.0;
 		for(channel=0U;channel<count;channel++) {
 			gnss_rf_channel_t *c=&channels[channel];
-			double base,data,signal,angle;
+			rf_oscillator_t *osc=&oscillators[channel];
+			double base,data,signal,next_i,next_q;
 			size_t code_index,data_index;
 			if(!c->enabled) continue;
 			code_index=(size_t)c->code_phase%c->code_length;
@@ -109,10 +126,15 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 					overlay=c->overlay_symbols[(size_t)c->overlay_phase%c->overlay_symbol_count];
 				signal=base*data*overlay;
 			}
-			angle=c->carrier_phase;
-			i += normalization*c->amplitude*signal*cos(angle);
-			q += normalization*c->amplitude*signal*sin(angle);
+			i += normalization*c->amplitude*signal*osc->i;
+			q += normalization*c->amplitude*signal*osc->q;
 			advance(&c->carrier_phase,TWO_PI*(c->carrier_hz+c->doppler_hz-center)/sample_rate,TWO_PI);
+			next_i=osc->i*osc->rotate_i-osc->q*osc->rotate_q;
+			next_q=osc->q*osc->rotate_i+osc->i*osc->rotate_q;
+			osc->i=next_i;osc->q=next_q;
+			/* Bound recurrence drift without putting trigonometry back into the
+			 * per-sample hot path. c->carrier_phase remains the canonical state. */
+			if((sample&4095U)==4095U){osc->i=cos(c->carrier_phase);osc->q=sin(c->carrier_phase);}
 			advance(&c->code_phase,c->code_rate_hz/sample_rate,(double)c->code_length);
 			advance(&c->data_phase,c->data_rate_hz/sample_rate,(double)c->data_symbol_count);
 			if(c->overlay_symbol_count>0U)
@@ -120,6 +142,7 @@ int gnss_rf_render(gnss_rf_channel_t *channels, size_t count, double center,
 		}
 		iq[sample*2U]=sample16(i); iq[sample*2U+1U]=sample16(q);
 	}
+	free(oscillators);
 	return 0;
 }
 

@@ -9,6 +9,13 @@ four. The pipeline includes native time conversion, orbit and clock modeling,
 iterative transmit time, navigation-message construction, spreading codes,
 modulation, Doppler, channel allocation, hardware validation, and real-time TX.
 
+**Repository description:** Real-time multi-GNSS baseband and bladeRF transmitter
+for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF, driven by broadcast
+RINEX navigation and static, recorded, keyboard, or controller receiver motion.
+
+**Suggested GitHub topics:** `bladerf`, `gnss`, `gps`, `galileo`, `beidou`,
+`glonass`, `sdr`, `signal-simulator`, `rinex`, `baseband`, `c`, `navigation`.
+
 This is research and lab software. Only transmit GPS-like RF signals inside a properly shielded test setup, with appropriate attenuation, and only where you are legally allowed to do so.
 
 ## Features
@@ -92,6 +99,9 @@ Clean build products:
 make clean
 ```
 
+For a guided first run, hardware/filter explanation, motion examples, and
+troubleshooting, read [USER_GUIDE.md](USER_GUIDE.md).
+
 ## Usage
 
 List the known signal profiles before configuring a run:
@@ -161,8 +171,8 @@ Simultaneous open-service example (wideband hardware and a mixed RINEX 3/4 file)
   -l 59.3293,18.0686,30 -d 60
 ```
 
-The default mixed plan is centered at 1582.3925 MHz with 48 Msps and 47.1 MHz
-analog bandwidth. The allocator considers all four constellations together and
+The default mixed plan is centered at 1582.3925 MHz with 50 Msps and a 48 MHz
+analog filter around a 47.1 MHz minimum waveform span. The allocator considers all four constellations together and
 keeps the 16 highest-elevation healthy signals that fit the realized device
 passband. Device range checks can reject this plan on hardware that cannot
 provide the required instantaneous bandwidth.
@@ -174,8 +184,23 @@ the opened device instead of assuming bladeRF 1.0 limits. It sets and reads
 back every timing-critical value. Exact sample rate and center frequency are
 required because silent coercion would change code, symbol, and carrier timing.
 Analog bandwidth may be quantized by hardware, but the realized value is
-accepted only when it still contains the complete modulated signal and is no
-wider than the complex sample rate.
+accepted only when read-back agrees with libbladeRF, contains the complete
+modulated signal, and is no wider than the complex sample rate. Waveform
+occupancy and requested filter bandwidth are separate profile properties, so
+guard margin is not incorrectly advertised as emitted spectrum.
+
+| Profile | Minimum waveform span | Default sample rate | Default filter |
+| --- | ---: | ---: | ---: |
+| `gps-l1ca` | 2.2506 MHz | 2.6 Msps | 2.5 MHz |
+| `galileo-e1` | 24.552 MHz | 36.828 Msps | 28 MHz |
+| `beidou-b1i` | 4.5012 MHz | 5 Msps | 5 MHz |
+| `glonass-l1of` | 8.9992 MHz | 12 Msps | 10 MHz |
+| `mixed-open` | 47.1 MHz | 50 Msps | 48 MHz |
+
+The Galileo filter is wider than its reference bandwidth so satellite Doppler
+and device filter quantization do not sit on the acceptance boundary. The mixed
+sample rate is wider than its analog filter, preserving a digital Nyquist guard
+at both edges.
 
 Use `-G` for model-independent overall TX gain. This is a relative gain setting,
 not calibrated RF power. `-a` and `-A` remain available together for bladeRF
@@ -183,7 +208,8 @@ not calibrated RF power. `-a` and `-A` remain available together for bladeRF
 they are rejected on devices without those named stages.
 
 With `-x 200`, the XB200 uses the native L-band bypass path and automatic
-low-loss TX filter selection. The RX path is not modified. On bladeRF 2.0,
+low-loss TX filter selection; attachment, path, and filter selection are read
+back and verified. The RX path is not modified. On bladeRF 2.0,
 libbladeRF chooses the AD9361 interpolation/FIR mode while configuring sample
 rate; forcing another FIR mode here would override that device adaptation.
 
@@ -322,6 +348,9 @@ physical hardware and receiver certification remain environment-dependent.
 ## Project documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - maintainer architecture, runtime flow, modules, and extension points.
+- [USER_GUIDE.md](USER_GUIDE.md) - installation, safe first run, RF/filter
+  planning, every input mode, hardware behavior, shutdown, troubleshooting,
+  and conducted acceptance testing.
 - [GPS_L1_CA_COVERAGE.md](GPS_L1_CA_COVERAGE.md) - implemented L1 C/A coverage, wired gaps, and non-certified areas.
 - [MULTI_GNSS.md](MULTI_GNSS.md) - constellation architecture, current capability matrix, and acceptance gates.
 - [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) - detailed per-service, input, timing,

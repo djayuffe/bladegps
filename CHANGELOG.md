@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Split each signal profile's minimum waveform span from its recommended analog
+  filter. Galileo now requests 28 MHz around the 24.552 MHz reference span,
+  BeiDou requests 5 MHz around 4.5012 MHz, and mixed mode uses 50 Msps with a
+  48 MHz filter around its 47.1 MHz full-plan span.
+- Hardened bladeRF startup with pre-mutation RF-plan validation, TX-channel and
+  USB-speed discovery, loopback disable/read-back, sample-rate set/get
+  agreement, bandwidth set/get agreement, and XB200 attachment/path/filter
+  verification.
+- Reject SC16 Q11 rates at or above the nominal 15 Msps USB High-Speed payload
+  ceiling and warn above 5 Msps, where sustained USB 2.0 operation is
+  host/controller dependent.
+- Replaced per-channel, per-sample carrier trigonometry with a phase-anchored
+  complex oscillator recurrence. Periodic canonical-phase re-anchoring bounds
+  drift while preserving bit-exact output across arbitrary render block splits.
+- Expanded `-L` with descriptions and complete RF defaults; added a full user
+  guide covering safety, setup, every input mode, filter math, hardware
+  behavior, troubleshooting, and conducted acceptance testing.
 - Preserved carrier, code, navigation-data, and overlay phase across normal
   per-block Doppler/rate updates; rate changes no longer make an unchanged
   satellite look like a newly allocated channel.
