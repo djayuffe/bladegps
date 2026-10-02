@@ -169,7 +169,9 @@ the real-time CPU budget of slower hosts.
 Use `-e FILE` for an existing navigation file. Supported production inputs are:
 
 - GPS RINEX 2 broadcast navigation;
-- mixed RINEX 3 navigation containing the selected record family;
+- mixed RINEX 3 navigation containing the selected record family; legacy
+  GLONASS records support state-vector propagation but do not contain the four
+  extended FDMA fields required to construct an authentic complete GNAV frame;
 - mixed RINEX 4 `EPH` records for GPS LNAV, Galileo INAV, BeiDou D1/D2, or
   GLONASS FDMA;
 - plain files and, on POSIX, directly streamed `.gz` or legacy `.Z` files.

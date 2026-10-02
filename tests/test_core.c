@@ -1205,6 +1205,13 @@ static void test_rinex4_mixed_navigation(void)
 			&relative_state,glonass_cycle)==0);
 		assert(relative_state<=1U);
 		{
+			gnss_calendar_time_t runtime_utc={2020,9,15,23,44,30.0};
+			uint8_t runtime_state=0U;
+			int8_t runtime_cycle[GLONASS_GNAV_FRAME_SYMBOLS];
+			assert(gnss_schedule_glonass(&records[2],&runtime_utc,
+				&runtime_state,runtime_cycle)==0);
+		}
+		{
 			int8_t seeded_cycle[GLONASS_GNAV_FRAME_SYMBOLS];
 			uint8_t seeded_state=1U;
 			assert(gnss_schedule_glonass(&records[2],&live_utc,
@@ -1258,6 +1265,8 @@ static void test_rinex4_mixed_navigation(void)
 	assert(strcmp(records[0].message,"INAV")==0);
 	assert(strcmp(records[1].message,"D1")==0);
 	assert(strcmp(records[2].message,"FDMA")==0);
+	assert(records[2].orbit_count==12U);
+	assert(gnss_glonass_gnav_from_rinex(&records[2],&glonass_immediate)==-1);
 }
 
 #ifndef _WIN32

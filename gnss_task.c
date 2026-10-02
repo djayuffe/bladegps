@@ -152,9 +152,24 @@ static int build_store(signal_store_t *s,const gnss_nav_record_t *r,
 		gnss_calendar_time_t utc_frame;
 		gps2date(&frame_time,&utc);
 		utc_frame=(gnss_calendar_time_t){utc.y,utc.m,utc.d,utc.hh,utc.mm,utc.sec};
-		if(gnss_glonass_l1of_code(s->data_code)!=0||
-			gnss_schedule_glonass(r,&utc_frame,
-				&s->glonass_previous_relative_bit,s->symbols)!=0)return -1;
+		if(r->orbit_count<16U) {
+			fprintf(stderr,"ERROR: GLONASS GNAV requires the 16 extended FDMA "
+				"fields supplied by RINEX 4; R%02u has %zu fields.\n",
+				r->prn,r->orbit_count);
+			return -1;
+		}
+		if(gnss_glonass_l1of_code(s->data_code)!=0) {
+			fprintf(stderr,"ERROR: GLONASS ranging-code construction failed.\n");
+			return -1;
+		}
+		if(gnss_schedule_glonass(r,&utc_frame,
+			&s->glonass_previous_relative_bit,s->symbols)!=0) {
+			fprintf(stderr,"ERROR: GLONASS GNAV schedule rejected UTC frame "
+				"%04d-%02d-%02dT%02d:%02d:%06.3f for R%02u.\n",
+				utc_frame.year,utc_frame.month,utc_frame.day,utc_frame.hour,
+				utc_frame.minute,utc_frame.second,r->prn);
+			return -1;
+		}
 		s->symbol_count=GLONASS_GNAV_FRAME_SYMBOLS;
 	}
 	s->ready=1; return 0;

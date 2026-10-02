@@ -110,7 +110,7 @@ List the known signal profiles before configuring a run:
 ./bladegps -L
 ```
 
-The status column is authoritative. Non-GPS profiles use a supplied mixed RINEX 3/4 file or auto-download a daily mixed file when `-e` is omitted.
+The status column is authoritative. Non-GPS profiles use a supplied mixed RINEX 3/4 file or auto-download a daily mixed file when `-e` is omitted. Complete GLONASS GNAV generation requires a RINEX 4 FDMA record because legacy RINEX 3 records omit four status/timing fields; bladeGPS refuses to fabricate them.
 
 ```text
 Usage: bladegps [options]

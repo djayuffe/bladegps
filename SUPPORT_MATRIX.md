@@ -47,7 +47,7 @@ elevation, and the best sixteen are retained.
 | Layer | GPS L1 C/A | Galileo E1 OS | BeiDou B1I | GLONASS L1OF | Mixed runtime |
 | --- | --- | --- | --- | --- | --- |
 | CLI profile and safe RF defaults | Implemented | Implemented | Implemented | Implemented | Implemented |
-| Broadcast record ingestion | GPS RINEX 2; typed RINEX 3/4 LNAV | Typed RINEX 3/4 INAV; FNAV recognized but not scheduled on E1 | Typed RINEX 3/4 D1/D2 | Typed RINEX 3/4 FDMA | One typed mixed file |
+| Broadcast record ingestion | GPS RINEX 2; typed RINEX 3/4 LNAV | Typed RINEX 3/4 INAV; FNAV recognized but not scheduled on E1 | Typed RINEX 3/4 D1/D2 | Typed RINEX 3/4 FDMA; complete GNAV generation requires the four extended RINEX 4 fields | One typed mixed file |
 | Health and age filtering | Implemented | E1-specific packed health interpretation | Implemented | Implemented | Per-system, before joint allocation |
 | Orbit and satellite clock | Kepler + clock + relativity | Kepler + clock + relativity | MEO/IGSO Kepler and GEO transform | RK4 state-vector propagation with J2/Earth rotation | Native model per record |
 | Iterative transmit-time solution | Implemented | Implemented | Implemented | Implemented | Implemented |
@@ -97,7 +97,7 @@ RF frame must not imply that optional real-world service data was available.
 | Input | GPS | Galileo | BeiDou | GLONASS | Notes |
 | --- | --- | --- | --- | --- | --- |
 | RINEX 2 GPS NAV | Yes | No | No | No | Used by the GPS automatic downloader and accepted by the shared typed loader. |
-| RINEX 3 mixed NAV | LNAV | INAV used; FNAV parsed only | D1/D2 inferred from record family/PRN | FDMA | Fixed-column validation and dynamic record allocation. |
+| RINEX 3 mixed NAV | LNAV | INAV used; FNAV parsed only | D1/D2 inferred from record family/PRN | State-vector propagation only | Legacy GLONASS records omit the status, group-delay, accuracy, and extended-health fields required for complete GNAV generation. |
 | RINEX 4 mixed NAV | `EPH G.. LNAV` | `EPH E.. INAV`; FNAV parsed only | `EPH C.. D1/D2` | `EPH R.. FDMA` | Unsupported record families are skipped without desynchronizing the stream. |
 | Plain file | Yes | Yes | Yes | Yes | Direct file input. |
 | `.gz` / legacy `.Z` navigation | Yes on POSIX | Yes on POSIX | Yes on POSIX | Yes on POSIX | Shared typed loader streams through a shell-free `gzip` child; automatic downloads are also cached decompressed. |

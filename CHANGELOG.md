@@ -15,6 +15,8 @@
   successive 30-second navigation frames instead of restarting it at zero.
 - Restricted `23:59:60` calendar input to actual historical positive leap-second
   insertion dates and reject fabricated leap seconds at other dates or times.
+- Report incomplete legacy GLONASS RINEX 3 records explicitly and require the
+  extended 16-field RINEX 4 FDMA record for authentic complete GNAV generation.
 - Split each signal profile's minimum waveform span from its recommended analog
   filter. Galileo now requests 28 MHz around the 24.552 MHz reference span,
   BeiDou requests 5 MHz around 4.5012 MHz, and mixed mode uses 50 Msps with a
