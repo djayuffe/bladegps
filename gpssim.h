@@ -1,6 +1,8 @@
 #ifndef GPSSIM_H
 #define GPSSIM_H
 
+#include <stdint.h>
+
 // Real-time signal generation with bladeRF
 #define BLADE_GPS
 
@@ -154,12 +156,12 @@ typedef struct
 	int ca[CA_SEQ_LEN]; /*< C/A Sequence */
 	double f_carr;	/*< Carrier frequency */
 	double f_code;	/*< Code frequency */
-	unsigned int carr_phase; /*< Carrier phase */
-	int carr_phasestep;	/*< Carrier phasestep */
+	uint32_t carr_phase; /*< 32-bit carrier phase accumulator */
+	int32_t carr_phasestep;	/*< signed 32-bit carrier phase step */
 	double code_phase; /*< Code phase */
 	gpstime_t g0;	/*!< GPS time at start */
-	unsigned long sbf[5][N_DWRD_SBF]; /*!< current subframe */
-	unsigned long dwrd[N_DWRD]; /*!< Data words of sub-frame */
+	uint32_t sbf[5][N_DWRD_SBF]; /*!< current 32-bit subframe words */
+	uint32_t dwrd[N_DWRD]; /*!< 30-bit transmitted words in 32-bit storage */
 	int iword;	/*!< initial word */
 	int ibit;	/*!< initial bit */
 	int icode;	/*!< initial code */
@@ -178,7 +180,7 @@ void ecef2neu(const double *xyz, double t[3][3], double *neu);
 /*! Generate 1023 GPS L1 C/A chips as 0/1 integers for PRN 1..37.
  * An invalid PRN leaves the caller's output unchanged. */
 void codegen(int *ca, int prn);
-unsigned long computeChecksum(unsigned long source, int nib);
+uint32_t computeChecksum(uint32_t source, int nib);
 double subGpsTime(gpstime_t g1, gpstime_t g0);
 void normalizeGpsTime(gpstime_t *g);
 int selectEphemerides(ephem_t selected[MAX_SAT],
@@ -190,7 +192,7 @@ int readRinexNavAll(ephem_t eph[][MAX_SAT], const char *fname);
 int readLlhMotion(double **xyz, const char *filename);
 int readUserMotion(double **xyz, const char *filename);
 int readNmeaGGA(double **xyz, const char *filename);
-void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF]);
+void eph2sbf(const ephem_t eph, uint32_t sbf[5][N_DWRD_SBF]);
 int generateNavMsg(gpstime_t g, channel_t *chan, int init);
 
 #endif

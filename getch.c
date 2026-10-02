@@ -12,8 +12,8 @@ char _getch(void) {
     return 0;
 
   raw = old;
-  raw.c_lflag &= ~ICANON;
-  raw.c_lflag &= ~ECHO;
+  raw.c_lflag &= (tcflag_t)~(tcflag_t)ICANON;
+  raw.c_lflag &= (tcflag_t)~(tcflag_t)ECHO;
   raw.c_cc[VMIN]=1;
   raw.c_cc[VTIME]=0;
   if (tcsetattr(0, TCSANOW, &raw) != 0)

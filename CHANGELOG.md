@@ -20,6 +20,17 @@
   receiver reference bandwidth and the default sample rate to 36.828 Msps.
   Three samples per CBOC subchip preserve BOC(6,1) while leaving Doppler margin,
   instead of aliasing the component at the old 4.092 Msps default.
+- Normalized iterative transmit time as a full week/SOW pair before navigation
+  scheduling and phase initialization. Signals just after week rollover now use
+  the preceding transmit week without negative phases or unsafe integer casts;
+  Galileo word 5 uses the actual transmit week rather than the ephemeris week.
+- Made GPS LNAV subframes, transmitted words, and parity state exact-width
+  32-bit values with explicit two's-complement packing, removing host word-size
+  and implicit signed-conversion dependencies.
+- Wrapped the GPS HOW 17-bit Z-count at 100800 so the final LNAV subframe of a
+  week announces the next subframe at count zero instead of an invalid 100800.
+- Hardened real-time GLONASS frequency-slot and navigation-field integer checks
+  against lossy implicit conversions.
 - Unified standalone GPS L1 C/A and mixed-system generation on the same
   constellation-neutral baseband producer, allocator, continuous-phase mixer,
   SC16 normalizer, and FIFO path.

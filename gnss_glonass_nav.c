@@ -187,13 +187,13 @@ int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *r,
 	if (frame_time < 0.0) frame_time += 604800.0;
 	frame_time = fmod(frame_time,86400.0);
 	f->tk_seconds = (uint32_t)llround(fmod(frame_time+10800.0,86400.0));
-	if (fabs(fmod(frame_time+10800.0,86400.0)-f->tk_seconds) > 1.0e-3 ||
+	if (fabs(fmod(frame_time+10800.0,86400.0)-(double)f->tk_seconds) > 1.0e-3 ||
 		(f->tk_seconds%30U)!=0U) return -1;
 	f->tb = (uint8_t)((((unsigned int)r->toc.hour*3600U+
 		(unsigned int)r->toc.minute*60U+(unsigned int)llround(r->toc.second)+10800U)
 		%86400U)/900U);
 	if (!isfinite(r->orbit[3]) || r->orbit[3] < 0.0 || r->orbit[3] > 1.0 ||
-		fabs(r->orbit[3]-llround(r->orbit[3])) > 1.0e-6) return -1;
+		fabs(r->orbit[3]-(double)llround(r->orbit[3])) > 1.0e-6) return -1;
 	f->bn = (uint8_t)((uint32_t)llround(r->orbit[3]) << 2);
 	f->slot = (uint8_t)r->prn;
 	nt = four_year_day(&r->toc);
@@ -203,7 +203,8 @@ int gnss_glonass_gnav_from_rinex(const gnss_nav_record_t *r,
 		return -1;
 	status=(int32_t)llround(r->orbit[12]); health_flags=(int32_t)llround(r->orbit[15]);
 	if (status<0 || status>511 || health_flags<0 || health_flags>7 ||
-		fabs(r->orbit[12]-status)>1e-6 || fabs(r->orbit[14]-llround(r->orbit[14]))>1e-6)
+		fabs(r->orbit[12]-(double)status)>1e-6 ||
+		fabs(r->orbit[14]-(double)llround(r->orbit[14]))>1e-6)
 		return -1;
 	f->mode=(uint8_t)((status>>7)&3); f->p4=(uint8_t)((status>>6)&1);
 	f->p3=(uint8_t)((status>>5)&1); f->p2=(uint8_t)((status>>4)&1);

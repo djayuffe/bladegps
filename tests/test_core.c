@@ -36,6 +36,7 @@ static void test_time_conversions(void)
 	gpstime_t g_before;
 	gpstime_t g_after;
 	gpstime_t rollover = {2200, SECONDS_IN_WEEK + 1.25};
+	gpstime_t previous_week = {2200, -0.25};
 
 	date2gps(&epoch, &g_epoch);
 	assert(g_epoch.week == 0);
@@ -48,6 +49,9 @@ static void test_time_conversions(void)
 	normalizeGpsTime(&rollover);
 	assert(rollover.week == 2201);
 	assert(fabs(rollover.sec - 1.25) < 1.0e-12);
+	normalizeGpsTime(&previous_week);
+	assert(previous_week.week == 2199);
+	assert(fabs(previous_week.sec - (SECONDS_IN_WEEK-0.25)) < 1.0e-12);
 	{
 		gnss_calendar_time_t before={2016,12,31,23,59,59.0};
 		gnss_calendar_time_t leap={2016,12,31,23,59,60.0};
@@ -107,6 +111,45 @@ static void test_ca_code_balance(void)
 	ones=0;
 	for(i=0;i<CA_SEQ_LEN;i++){assert(ca[i]==0||ca[i]==1);ones+=ca[i];}
 	assert(ones==512);
+}
+
+static void test_gps_lnav_word_width(void)
+{
+	ephem_t ephemeris;
+	channel_t channel;
+	gpstime_t frame = {2200, 100020.0};
+	size_t subframe, word;
+
+	memset(&ephemeris, 0, sizeof(ephemeris));
+	memset(&channel, 0, sizeof(channel));
+	ephemeris.toe.week = frame.week;
+	ephemeris.toe.sec = 100000.0;
+	ephemeris.toc = ephemeris.toe;
+	eph2sbf(ephemeris, channel.sbf);
+	assert(sizeof(channel.sbf[0][0]) == 4U);
+	assert(sizeof(channel.dwrd[0]) == 4U);
+	for (subframe = 0U; subframe < N_SBF; subframe++)
+		for (word = 0U; word < N_DWRD_SBF; word++)
+			assert((channel.sbf[subframe][word] & UINT32_C(0xC000003F)) == 0U);
+	assert(generateNavMsg(frame, &channel, 1) == 1);
+	for (word = 0U; word < N_DWRD; word++)
+		assert((channel.dwrd[word] & UINT32_C(0xC0000000)) == 0U);
+
+	/* The HOW carries the start time of the following six-second subframe.
+	 * Its 17-bit Z-count has 100800 valid states and must wrap at week end. */
+	memset(&channel, 0, sizeof(channel));
+	frame.sec = SECONDS_IN_WEEK - 30.0;
+	eph2sbf(ephemeris, channel.sbf);
+	assert(generateNavMsg(frame, &channel, 1) == 1);
+	for (subframe = 0U; subframe < N_SBF; subframe++) {
+		const size_t how_index = (subframe + 1U) * N_DWRD_SBF + 1U;
+		const uint32_t previous_d30 = channel.dwrd[how_index - 1U] & UINT32_C(1);
+		const uint32_t decoded = channel.dwrd[how_index] ^
+			(previous_d30 != 0U ? UINT32_C(0x3FFFFFC0) : UINT32_C(0));
+		const uint32_t expected = subframe == N_SBF - 1U ? 0U :
+			UINT32_C(100796) + (uint32_t)subframe;
+		assert(((decoded >> 13U) & UINT32_C(0x1FFFF)) == expected);
+	}
 }
 
 static void test_ephemeris_selection(void)
@@ -1318,6 +1361,7 @@ int main(void)
 	test_time_conversions();
 	test_coordinate_round_trip();
 	test_ca_code_balance();
+	test_gps_lnav_word_width();
 	test_ephemeris_selection();
 	test_signal_profiles();
 	test_independent_receiver_loopback();

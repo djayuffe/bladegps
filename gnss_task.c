@@ -88,10 +88,10 @@ static int gps_ephemeris_from_record(const gnss_nav_record_t *r,ephem_t *e)
 		!isfinite(r->orbit[22])||!isfinite(r->orbit[23]))return -1;
 	iode=lround(r->orbit[0]);week=lround(r->orbit[18]);health=lround(r->orbit[21]);
 	iodc=lround(r->orbit[23]);
-	if(fabs(r->orbit[0]-iode)>1.0e-6||iode<0||iode>255||
-		fabs(r->orbit[18]-week)>1.0e-6||week<0||week>INT_MAX||
-		fabs(r->orbit[21]-health)>1.0e-6||health<0||health>63||
-		fabs(r->orbit[23]-iodc)>1.0e-6||iodc<0||iodc>1023)return -1;
+	if(fabs(r->orbit[0]-(double)iode)>1.0e-6||iode<0||iode>255||
+		fabs(r->orbit[18]-(double)week)>1.0e-6||week<0||week>INT_MAX||
+		fabs(r->orbit[21]-(double)health)>1.0e-6||health<0||health>63||
+		fabs(r->orbit[23]-(double)iodc)>1.0e-6||iodc<0||iodc>1023)return -1;
 	memset(e,0,sizeof(*e));e->vflg=1;e->toc=toc;e->toe.week=(int)week;
 	e->toe.sec=r->orbit[8];e->iode=(int)iode;e->iodc=(int)iodc;
 	e->crs=r->orbit[1];e->deltan=r->orbit[2];e->m0=r->orbit[3];e->cuc=r->orbit[4];
@@ -127,9 +127,8 @@ static int build_store(signal_store_t *s,const gnss_nav_record_t *r,
 {
 	if(signal==GNSS_SIGNAL_GPS_L1CA)return build_gps_store(s,r,week,sow);
 	if(signal==GNSS_SIGNAL_GALILEO_E1) {
-		if(isfinite(r->orbit[18]))week=(int)llround(r->orbit[18]);
-		/* RINEX GAL week is continuous and GPS-aligned; the on-air 12-bit
-		 * GST week started at continuous GPS week 1024. */
+		/* The current transmit week, not the ephemeris reference week, belongs
+		 * in I/NAV word 5. GST's on-air 12-bit week started at GPS week 1024. */
 		if(week<1024)return -1;
 		week=(week-1024)%4096;
 		if(gnss_galileo_e1_primary_code(r->prn,GALILEO_E1_COMPONENT_B,s->data_code)!=0||
@@ -275,8 +274,11 @@ void *gnss_task(void *argument)
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
 			double carrier=channel_profile->carrier_hz,occupied=channel_profile->recommended_bandwidth_hz;
 			if(signal==GNSS_SIGNAL_GLONASS_L1OF){double raw_slot=records[record_index].orbit[7];int slot;
-				if(!isfinite(raw_slot)||fabs(raw_slot-llround(raw_slot))>1.0e-6)continue;
-				slot=(int)llround(raw_slot);if(gnss_glonass_l1of_carrier_hz(slot,&carrier)!=0)continue;}
+				long long rounded_slot;
+				if(!isfinite(raw_slot))continue;
+				rounded_slot=llround(raw_slot);
+				if(fabs(raw_slot-(double)rounded_slot)>1.0e-6||rounded_slot<INT_MIN||rounded_slot>INT_MAX)continue;
+				slot=(int)rounded_slot;if(gnss_glonass_l1of_carrier_hz(slot,&carrier)!=0)continue;}
 			if(signal==GNSS_SIGNAL_GLONASS_L1OF)occupied=2.2*channel_profile->code_rate_hz;
 			gpstime_t system_time;
 			if(gnss_gps_to_system_time(records[record_index].system,&time,&system_time)!=0)continue;
@@ -290,20 +292,25 @@ void *gnss_task(void *argument)
 		for(n=0;n<selected_count;n++){size_t c=selected[n],ri=candidate_records[c];gnss_signal_t signal=candidate_signals[c];
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
 			signal_store_t *st=&stores[(size_t)records[ri].system*(MAX_GNSS_PRN+1U)+candidates[c].prn];
-			double transmit_sow=observations[c].transmit_sow;
+			gpstime_t transmit_time;
+			double transmit_sow;
 			double rate_scale=1.0+observations[c].doppler_hz/candidates[c].carrier_hz;
 			gpstime_t system_time;
-			uint32_t schedule_sow=(uint32_t)(floor((transmit_sow+1.0e-7)/30.0)*30.0);
 			if(gnss_gps_to_system_time(records[ri].system,&time,&system_time)!=0){failure="time-scale conversion failed";goto done;}
+			transmit_time.week=system_time.week;
+			transmit_time.sec=observations[c].transmit_sow;
+			normalizeGpsTime(&transmit_time);
+			transmit_sow=transmit_time.sec;
+			uint32_t schedule_sow=(uint32_t)(floor(transmit_sow/30.0)*30.0);
 			double overlay_rate=signal==GNSS_SIGNAL_GALILEO_E1?250.0:1000.0;
 			size_t overlay_count=signal==GNSS_SIGNAL_GALILEO_E1?GALILEO_E1C_SECONDARY_LENGTH:
 				signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D1")==0?BEIDOU_B1I_NH_LENGTH:0U;
-			if(schedule_sow>=604800U)schedule_sow=0U;
-			if((!st->ready||st->record_index!=ri||st->schedule_week!=system_time.week||st->schedule_sow!=schedule_sow)&&
-				build_store(st,&records[ri],signal,system_time.week,schedule_sow,
+			if(schedule_sow>=604800U){failure="normalized transmit time is outside its week";goto done;}
+			if((!st->ready||st->record_index!=ri||st->schedule_week!=transmit_time.week||st->schedule_sow!=schedule_sow)&&
+				build_store(st,&records[ri],signal,transmit_time.week,schedule_sow,
 					iono_alpha,iono_beta)!=0){failure="navigation-message cycle construction failed";goto done;}
 			st->record_index=ri;
-			st->schedule_week=system_time.week;st->schedule_sow=schedule_sow;
+			st->schedule_week=transmit_time.week;st->schedule_sow=schedule_sow;
 			desired[n]=(gnss_rf_channel_t){1,signal==GNSS_SIGNAL_GALILEO_E1?GNSS_RF_GALILEO_E1:GNSS_RF_BPSK,
 				records[ri].system,candidates[c].prn,candidates[c].carrier_hz,observations[c].doppler_hz,
 				signal==GNSS_SIGNAL_GALILEO_E1?90.0:120.0,
@@ -311,7 +318,7 @@ void *gnss_task(void *argument)
 				channel_profile->code_rate_hz*rate_scale,observations[c].code_phase_chips,
 				st->symbols,st->symbol_count,(signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:
 				(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0))*rate_scale,
-				fmod(transmit_sow*(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0),st->symbol_count),
+				fmod(transmit_sow*(signal==GNSS_SIGNAL_GALILEO_E1?250.0:signal==GNSS_SIGNAL_BEIDOU_B1I&&strcmp(records[ri].message,"D2")==0?500.0:signal==GNSS_SIGNAL_BEIDOU_B1I?50.0:signal==GNSS_SIGNAL_GPS_L1CA?50.0:100.0),(double)st->symbol_count),
 				signal==GNSS_SIGNAL_GALILEO_E1||signal==GNSS_SIGNAL_BEIDOU_B1I?st->overlay:NULL,
 				overlay_count,overlay_rate*rate_scale,overlay_count>0U?fmod(transmit_sow*overlay_rate,(double)overlay_count):0.0,
 				observations[c].carrier_phase_rad};}

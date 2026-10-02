@@ -222,9 +222,9 @@ void gps2date(const gpstime_t *g, datetime_t *t)
 	e = 365*d + d/4;
 	f = (long)((double)(c-e)/30.6001 );
 
-	t->d = c - e - (int)(30.6001*f);
-	t->m = f - 1 - 12*(f/14);
-	t->y  = d - 4715 - ((7 + t->m)/10);
+	t->d = (int)(c - e - (long)(30.6001*(double)f));
+	t->m = (int)(f - 1L - 12L*(f/14L));
+	t->y = (int)(d - 4715L - ((7L + (long)t->m)/10L));
 
 	t->hh = ((int)(gsec/3600.0))%24;
 	t->mm = ((int)(gsec/60.0))%60;
@@ -501,105 +501,115 @@ void satpos(ephem_t eph, gpstime_t g, double *pos, double *vel, double *clk)
  *  \param[in] eph Ephemeris of given SV
  *  \param[out] sbf Array of five sub-frames, 10 long words each
  */
-void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF])
+void eph2sbf(const ephem_t eph, uint32_t sbf[5][N_DWRD_SBF])
 {
-	unsigned long wn;
-	unsigned long toe;
-	unsigned long toc;
-	unsigned long iode;
-	unsigned long iodc;
-	long deltan;
-	long cuc;
-	long cus;
-	long cic;
-	long cis;
-	long crc;
-	long crs;
-	unsigned long ecc;
-	unsigned long sqrta;
-	long m0;
-	long omg0;
-	long inc0;
-	long aop;
-	long omgdot;
-	long idot;
-	long af0;
-	long af1;
-	long af2;
-	long tgd;
+	uint32_t wn;
+	uint32_t toe;
+	uint32_t toc;
+	uint32_t iode;
+	uint32_t iodc;
+	int32_t deltan;
+	int32_t cuc;
+	int32_t cus;
+	int32_t cic;
+	int32_t cis;
+	int32_t crc;
+	int32_t crs;
+	uint32_t ecc;
+	uint32_t sqrta;
+	int32_t m0;
+	int32_t omg0;
+	int32_t inc0;
+	int32_t aop;
+	int32_t omgdot;
+	int32_t idot;
+	int32_t af0;
+	int32_t af1;
+	int32_t af2;
+	int32_t tgd;
 
-	unsigned long ura;
-	unsigned long dataId = 1UL;
-	unsigned long sbf4_page25_svId = 63UL;
-	unsigned long sbf5_page25_svId = 51UL;
+	uint32_t ura;
+	uint32_t dataId = UINT32_C(1);
+	uint32_t sbf4_page25_svId = UINT32_C(63);
+	uint32_t sbf5_page25_svId = UINT32_C(51);
 
-	unsigned long wna;
-	unsigned long toa;
+	uint32_t wna;
+	uint32_t toa;
 
-	wn = (unsigned long)(eph.toe.week%1024);
-	toe = (unsigned long)(eph.toe.sec/16.0);
-	toc = (unsigned long)(eph.toc.sec/16.0);
-	iode = (unsigned long)(eph.iode);
-	iodc = (unsigned long)(eph.iodc);
-	deltan = (long)(eph.deltan/POW2_M43/PI);
-	cuc = (long)(eph.cuc/POW2_M29);
-	cus = (long)(eph.cus/POW2_M29);
-	cic = (long)(eph.cic/POW2_M29);
-	cis = (long)(eph.cis/POW2_M29);
-	crc = (long)(eph.crc/POW2_M5);
-	crs = (long)(eph.crs/POW2_M5);
-	ecc = (unsigned long)(eph.ecc/POW2_M33);
-	sqrta = (unsigned long)(eph.sqrta/POW2_M19);
-	m0 = (long)(eph.m0/POW2_M31/PI);
-	omg0 = (long)(eph.omg0/POW2_M31/PI);
-	inc0 = (long)(eph.inc0/POW2_M31/PI);
-	aop = (long)(eph.aop/POW2_M31/PI);
-	omgdot = (long)(eph.omgdot/POW2_M43/PI);
-	idot = (long)(eph.idot/POW2_M43/PI);
-	af0 = (long)(eph.af0/POW2_M31);
-	af1 = (long)(eph.af1/POW2_M43);
-	af2 = (long)(eph.af2/POW2_M55);
-	tgd = (long)(eph.tgd/POW2_M31);
+	wn = (uint32_t)(eph.toe.week%1024);
+	toe = (uint32_t)(eph.toe.sec/16.0);
+	toc = (uint32_t)(eph.toc.sec/16.0);
+	iode = (uint32_t)eph.iode;
+	iodc = (uint32_t)eph.iodc;
+	deltan = (int32_t)(eph.deltan/POW2_M43/PI);
+	cuc = (int32_t)(eph.cuc/POW2_M29);
+	cus = (int32_t)(eph.cus/POW2_M29);
+	cic = (int32_t)(eph.cic/POW2_M29);
+	cis = (int32_t)(eph.cis/POW2_M29);
+	crc = (int32_t)(eph.crc/POW2_M5);
+	crs = (int32_t)(eph.crs/POW2_M5);
+	ecc = (uint32_t)(eph.ecc/POW2_M33);
+	sqrta = (uint32_t)(eph.sqrta/POW2_M19);
+	m0 = (int32_t)(eph.m0/POW2_M31/PI);
+	omg0 = (int32_t)(eph.omg0/POW2_M31/PI);
+	inc0 = (int32_t)(eph.inc0/POW2_M31/PI);
+	aop = (int32_t)(eph.aop/POW2_M31/PI);
+	omgdot = (int32_t)(eph.omgdot/POW2_M43/PI);
+	idot = (int32_t)(eph.idot/POW2_M43/PI);
+	af0 = (int32_t)(eph.af0/POW2_M31);
+	af1 = (int32_t)(eph.af1/POW2_M43);
+	af2 = (int32_t)(eph.af2/POW2_M55);
+	tgd = (int32_t)(eph.tgd/POW2_M31);
 
-	wna = (unsigned long)(eph.toe.week%256);
-	toa = (unsigned long)(eph.toe.sec/4096.0);
-	ura = uraIndexFromAccuracy(eph.sv_accuracy);
+	wna = (uint32_t)(eph.toe.week%256);
+	toa = (uint32_t)(eph.toe.sec/4096.0);
+	ura = (uint32_t)uraIndexFromAccuracy(eph.sv_accuracy);
 
 	// Subframe 1
 	sbf[0][0] = 0x8B0000UL<<6;
 	sbf[0][1] = 0x1UL<<8;
-	sbf[0][2] = ((wn&0x3FFUL)<<20) | (ura<<14) | (((unsigned long)eph.sv_health&0x3FUL)<<8) | (((iodc>>8)&0x3UL)<<6);
+	sbf[0][2] = ((wn&UINT32_C(0x3FF))<<20) | (ura<<14) |
+		(((uint32_t)eph.sv_health&UINT32_C(0x3F))<<8) |
+		(((iodc>>8)&UINT32_C(0x3))<<6);
 	sbf[0][3] = 0UL;
 	sbf[0][4] = 0UL;
 	sbf[0][5] = 0UL;
-	sbf[0][6] = (tgd&0xFFUL)<<6;
-	sbf[0][7] = ((iodc&0xFFUL)<<22) | ((toc&0xFFFFUL)<<6);
-	sbf[0][8] = ((af2&0xFFUL)<<22) | ((af1&0xFFFFUL)<<6);
-	sbf[0][9] = (af0&0x3FFFFFUL)<<8;
+	sbf[0][6] = ((uint32_t)tgd&UINT32_C(0xFF))<<6;
+	sbf[0][7] = ((iodc&UINT32_C(0xFF))<<22) | ((toc&UINT32_C(0xFFFF))<<6);
+	sbf[0][8] = (((uint32_t)af2&UINT32_C(0xFF))<<22) |
+		(((uint32_t)af1&UINT32_C(0xFFFF))<<6);
+	sbf[0][9] = ((uint32_t)af0&UINT32_C(0x3FFFFF))<<8;
 
 	// Subframe 2
 	sbf[1][0] = 0x8B0000UL<<6;
 	sbf[1][1] = 0x2UL<<8;
-	sbf[1][2] = ((iode&0xFFUL)<<22) | ((crs&0xFFFFUL)<<6);
-	sbf[1][3] = ((deltan&0xFFFFUL)<<14) | (((m0>>24)&0xFFUL)<<6);
-	sbf[1][4] = (m0&0xFFFFFFUL)<<6;
-	sbf[1][5] = ((cuc&0xFFFFUL)<<14) | (((ecc>>24)&0xFFUL)<<6);
-	sbf[1][6] = (ecc&0xFFFFFFUL)<<6;
-	sbf[1][7] = ((cus&0xFFFFUL)<<14) | (((sqrta>>24)&0xFFUL)<<6);
-	sbf[1][8] = (sqrta&0xFFFFFFUL)<<6;
-	sbf[1][9] = (toe&0xFFFFUL)<<14;
+	sbf[1][2] = ((iode&UINT32_C(0xFF))<<22) | (((uint32_t)crs&UINT32_C(0xFFFF))<<6);
+	sbf[1][3] = (((uint32_t)deltan&UINT32_C(0xFFFF))<<14) |
+		((((uint32_t)m0>>24)&UINT32_C(0xFF))<<6);
+	sbf[1][4] = ((uint32_t)m0&UINT32_C(0xFFFFFF))<<6;
+	sbf[1][5] = (((uint32_t)cuc&UINT32_C(0xFFFF))<<14) |
+		(((ecc>>24)&UINT32_C(0xFF))<<6);
+	sbf[1][6] = (ecc&UINT32_C(0xFFFFFF))<<6;
+	sbf[1][7] = (((uint32_t)cus&UINT32_C(0xFFFF))<<14) |
+		(((sqrta>>24)&UINT32_C(0xFF))<<6);
+	sbf[1][8] = (sqrta&UINT32_C(0xFFFFFF))<<6;
+	sbf[1][9] = (toe&UINT32_C(0xFFFF))<<14;
 
 	// Subframe 3
 	sbf[2][0] = 0x8B0000UL<<6;
 	sbf[2][1] = 0x3UL<<8;
-	sbf[2][2] = ((cic&0xFFFFUL)<<14) | (((omg0>>24)&0xFFUL)<<6);
-	sbf[2][3] = (omg0&0xFFFFFFUL)<<6;
-	sbf[2][4] = ((cis&0xFFFFUL)<<14) | (((inc0>>24)&0xFFUL)<<6);
-	sbf[2][5] = (inc0&0xFFFFFFUL)<<6;
-	sbf[2][6] = ((crc&0xFFFFUL)<<14) | (((aop>>24)&0xFFUL)<<6);
-	sbf[2][7] = (aop&0xFFFFFFUL)<<6;
-	sbf[2][8] = (omgdot&0xFFFFFFUL)<<6;
-	sbf[2][9] = ((iode&0xFFUL)<<22) | ((idot&0x3FFFUL)<<8);
+	sbf[2][2] = (((uint32_t)cic&UINT32_C(0xFFFF))<<14) |
+		((((uint32_t)omg0>>24)&UINT32_C(0xFF))<<6);
+	sbf[2][3] = ((uint32_t)omg0&UINT32_C(0xFFFFFF))<<6;
+	sbf[2][4] = (((uint32_t)cis&UINT32_C(0xFFFF))<<14) |
+		((((uint32_t)inc0>>24)&UINT32_C(0xFF))<<6);
+	sbf[2][5] = ((uint32_t)inc0&UINT32_C(0xFFFFFF))<<6;
+	sbf[2][6] = (((uint32_t)crc&UINT32_C(0xFFFF))<<14) |
+		((((uint32_t)aop>>24)&UINT32_C(0xFF))<<6);
+	sbf[2][7] = ((uint32_t)aop&UINT32_C(0xFFFFFF))<<6;
+	sbf[2][8] = ((uint32_t)omgdot&UINT32_C(0xFFFFFF))<<6;
+	sbf[2][9] = ((iode&UINT32_C(0xFF))<<22) |
+		(((uint32_t)idot&UINT32_C(0x3FFF))<<8);
 
 	// Subframe 4, page 25
 	sbf[3][0] = 0x8B0000UL<<6;
@@ -616,7 +626,8 @@ void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF])
 	// Subframe 5, page 25
 	sbf[4][0] = 0x8B0000UL<<6;
 	sbf[4][1] = 0x5UL<<8;
-	sbf[4][2] = (dataId<<28) | (sbf5_page25_svId<<22) | ((toa&0xFFUL)<<14) | ((wna&0xFFUL)<<6);
+	sbf[4][2] = (dataId<<28) | (sbf5_page25_svId<<22) |
+		((toa&UINT32_C(0xFF))<<14) | ((wna&UINT32_C(0xFF))<<6);
 	sbf[4][3] = 0UL;
 	sbf[4][4] = 0UL;
 	sbf[4][5] = 0UL;
@@ -632,12 +643,13 @@ void eph2sbf(const ephem_t eph, unsigned long sbf[5][N_DWRD_SBF])
  *  \param[in] v long word in whihc bits are counted
  *  \returns Count of bits set to 1
  */
-unsigned long countBits(unsigned long v)
+static uint32_t countBits(uint32_t v)
 {
-	unsigned long c;
+	uint32_t c;
 	const int S[] = {1, 2, 4, 8, 16};
-	const unsigned long B[] = {
-		0x55555555, 0x33333333, 0x0F0F0F0F, 0x00FF00FF, 0x0000FFFF};
+	const uint32_t B[] = {
+		UINT32_C(0x55555555), UINT32_C(0x33333333), UINT32_C(0x0F0F0F0F),
+		UINT32_C(0x00FF00FF), UINT32_C(0x0000FFFF)};
 
 	c = v;
 	c = ((c >> S[0]) & B[0]) + (c & B[0]);
@@ -654,7 +666,7 @@ unsigned long countBits(unsigned long v)
  *  \param[in] nib Does this word contain non-information-bearing bits?
  *  \returns Computed Checksum
  */
-unsigned long computeChecksum(unsigned long source, int nib)
+uint32_t computeChecksum(uint32_t source, int nib)
 {
 	/*
 	Bits 31 to 30 = 2 LSBs of the previous transmitted word, D29* and D30*
@@ -680,14 +692,14 @@ unsigned long computeChecksum(unsigned long source, int nib)
 	D30    00 1011 0111 1010 1000 1001 1100 0000
 	*/
 
-	unsigned long bmask[6] = { 
-		0x3B1F3480UL, 0x1D8F9A40UL, 0x2EC7CD00UL,
-		0x1763E680UL, 0x2BB1F340UL, 0x0B7A89C0UL };
+	const uint32_t bmask[6] = {
+		UINT32_C(0x3B1F3480), UINT32_C(0x1D8F9A40), UINT32_C(0x2EC7CD00),
+		UINT32_C(0x1763E680), UINT32_C(0x2BB1F340), UINT32_C(0x0B7A89C0)};
 
-	unsigned long D;
-	unsigned long d = source & 0x3FFFFFC0UL;
-	unsigned long D29 = (source>>31)&0x1UL;
-	unsigned long D30 = (source>>30)&0x1UL;
+	uint32_t D;
+	uint32_t d = source & UINT32_C(0x3FFFFFC0);
+	uint32_t D29 = (source>>31)&UINT32_C(1);
+	uint32_t D30 = (source>>30)&UINT32_C(1);
 
 	if (nib) // Non-information bearing bits for word 2 and 10
 	{
@@ -697,14 +709,14 @@ unsigned long computeChecksum(unsigned long source, int nib)
 		*/
 
 		if ((D30 + countBits(bmask[4] & d)) % 2)
-			d ^= (0x1UL<<6);
+			d ^= (UINT32_C(1)<<6);
 		if ((D29 + countBits(bmask[5] & d)) % 2)
-			d ^= (0x1UL<<7);
+			d ^= (UINT32_C(1)<<7);
 	}
 
 	D = d;
 	if (D30)
-		D ^= 0x3FFFFFC0UL;
+		D ^= UINT32_C(0x3FFFFFC0);
 
 	D |= ((D29 + countBits(bmask[0] & d)) % 2) << 5;
 	D |= ((D30 + countBits(bmask[1] & d)) % 2) << 4;
@@ -1676,16 +1688,16 @@ int generateNavMsg(gpstime_t g, channel_t *chan, int init)
 {
 	int iwrd,isbf;
 	gpstime_t g0;
-	unsigned long tow;
-	unsigned sbfwrd;
-	unsigned long prevwrd;
+	uint32_t tow;
+	uint32_t sbfwrd;
+	uint32_t prevwrd;
 	int nib;
 
 	g0.week = g.week;
 	g0.sec = floor(g.sec/30.0) * 30.0; // Align with the current 30-second frame.
 	chan->g0 = g0; // Data bit reference time
 
-	tow = ((unsigned long)g0.sec)/6UL;
+	tow = (uint32_t)(g0.sec/6.0) % UINT32_C(100800);
 
 	if (init==1) // Initialize subframe 5
 	{
@@ -1727,7 +1739,7 @@ int generateNavMsg(gpstime_t g, channel_t *chan, int init)
 
 	for (isbf=0; isbf<N_SBF; isbf++)
 	{
-		tow++;
+		tow=(tow+UINT32_C(1))%UINT32_C(100800);
 
 		for (iwrd=0; iwrd<N_DWRD_SBF; iwrd++)
 		{
@@ -2283,7 +2295,7 @@ void *gps_task(void *arg)
 	////////////////////////////////////////////////////////////
 
 	// Allocate I/Q buffer
-	iq_buff = calloc(2 * iq_buff_size, sizeof(*iq_buff));
+	iq_buff = calloc((size_t)2U*(size_t)iq_buff_size, sizeof(*iq_buff));
 
 	if (iq_buff==NULL)
 	{
@@ -2566,7 +2578,7 @@ void *gps_task(void *arg)
 							}
 
 							// Set new navigation data bit
-							chan[i].dataBit = (int)((chan[i].dwrd[chan[i].iword]>>(29-chan[i].ibit)) & 0x1UL)*2-1;
+					chan[i].dataBit = (int)((chan[i].dwrd[chan[i].iword]>>(29-chan[i].ibit)) & UINT32_C(1))*2-1;
 						}
 					}
 
@@ -2574,7 +2586,7 @@ void *gps_task(void *arg)
 					chan[i].codeCA = chan[i].ca[(int)chan[i].code_phase]*2-1;
 
 					// Update carrier phase
-					chan[i].carr_phase += chan[i].carr_phasestep;
+					chan[i].carr_phase += (uint32_t)chan[i].carr_phasestep;
 				}
 			}
 
