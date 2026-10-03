@@ -24,9 +24,8 @@ typedef struct {
 
 static double record_age(const gnss_nav_record_t *record, const gpstime_t *now)
 {
-	gpstime_t epoch;
-	if(gnss_calendar_to_gps(record->system,&record->toc,&epoch)!=0)return HUGE_VAL;
-	return gnss_time_difference(now,&epoch);
+	double age=gnss_nav_record_age(record,now);
+	return isfinite(age)?age:HUGE_VAL;
 }
 
 static int generation_finished(sim_t *sim)
@@ -235,7 +234,8 @@ void *gnss_task(void *argument)
 			const gnss_signal_profile_t *record_profile=gnss_signal_profile(record_signal(&records[n]));
 			if(record_profile==NULL||records[n].prn>record_profile->maximum_sv)continue;
 			double age=record_age(&records[n],&time);
-			if(age < -30.0 || age > (records[n].system==GNSS_SYSTEM_GLONASS?1800.0:14400.0))continue;
+			double maximum_age=gnss_nav_record_max_age(&records[n]);
+			if(maximum_age<0.0||age < -30.0 || age > maximum_age)continue;
 			usable=1;break;
 		}
 		if(!usable){failure="navigation file has no healthy in-age record for the selected signal and start time";goto done;}
@@ -304,7 +304,7 @@ void *gnss_task(void *argument)
 		if(step>0)for(n=0;n<3U;n++)receiver_velocity[n]=(xyz[step][n]-xyz[step-1][n])*10.0;
 		for(system=GNSS_SYSTEM_GPS;system<GNSS_SYSTEM_COUNT;system++)for(n=1;n<=MAX_GNSS_PRN;n++)
 			if(best[system][n]!=SIZE_MAX&&best_age[system][n]>=-30.0&&best_age[system][n]<=
-			(records[best[system][n]].system==GNSS_SYSTEM_GLONASS?1800.0:14400.0)){
+			gnss_nav_record_max_age(&records[best[system][n]])){
 			size_t record_index=best[system][n];gnss_signal_t signal=record_signal(&records[record_index]);
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
 			double carrier=channel_profile->carrier_hz,occupied=channel_profile->occupied_bandwidth_hz;

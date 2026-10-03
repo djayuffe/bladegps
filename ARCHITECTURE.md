@@ -124,15 +124,24 @@ When `-e` is omitted:
 3. `day_of_year()` maps the date to RINEX day-of-year.
 4. GPS uses `brdcDDD0.YYn`; non-GPS profiles use the long-name mixed RINEX cache `BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx`.
 5. Existing local files are reused only after the same parse/usability/age validation as a fresh download.
-6. GPS files come from NOAA/NGS and BKG legacy/mixed products. Other profiles try four daily BKG mixed products:
+6. Live runs first try BKG's rolling 24-hour multi-GNSS product, refreshed
+   every 15 minutes. Daily fallback order is BKG `BRD400DLR`, `BRDC00IGS`,
+   `BRDM00DLR`, `BRDC00WRD_R`, and `BRDC00WRD_S`; IGN mirrors provide an
+   independent data-centre path. GPS also has NOAA/NGS and BKG legacy RINEX 2
+   fallbacks.
 
 ```text
-https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz
-https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz
+https://igs.bkg.bund.de/root_ftp/NTRIP/BRDC/brdc_last.rnx.Z
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRD400DLR_S_YYYYDDD0000_01D_MN.rnx.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDM00DLR_S_YYYYDDD0000_01D_MN.rnx.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00WRD_R_YYYYDDD0000_01D_MN.rnx.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00WRD_S_YYYYDDD0000_01D_MN.rnx.gz
-https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDM00DLR_S_YYYYDDD0000_01D_MN.rnx.gz
+ftp://igs.ign.fr/pub/igs/data/YYYY/DDD/BRD400DLR_S_YYYYDDD0000_01D_MN.rnx.gz
+ftp://igs.ign.fr/pub/igs/data/YYYY/DDD/BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx.gz
+ftp://igs.ign.fr/pub/igs/data/YYYY/DDD/BRDM00DLR_S_YYYYDDD0000_01D_MN.rnx.gz
+https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz
 ```
 
 The downloader requires `curl` and `gzip`. Temporary compressed and decompressed files are promoted only after typed parsing confirms usable, healthy, in-age records. Live mode may try the previous UTC day. Partial, stale, wrong-family, and incomplete-GLONASS products are cleaned up and never cached as success.
@@ -431,8 +440,9 @@ bladeGPS can generate signals in a protected satellite navigation band. The soft
   is marked dummy, reserved, or unavailable instead of being fabricated.
 - There is no integrity, multipath, spoofing, or ionospheric scenario editor.
 - There is no independent built-in almanac downloader.
-- Automatic acquisition uses NOAA/NGS and BKG GPS or mixed daily broadcast
-  navigation products; it is not a general archival product client.
+- Automatic acquisition uses BKG rolling and daily merged products, IGN daily
+  mirrors, and NOAA/NGS plus BKG legacy GPS navigation files; it is not a
+  general archival product client.
 - Hardware behavior depends on local bladeRF firmware, FPGA, libbladeRF,
   clocking, gain setup, filter response, and RF test environment.
 - Software tests do not replace calibrated spectrum, navigation decode, PVT,

@@ -185,6 +185,12 @@ today’s UTC date is used and live mode is enabled. Downloads and caches are
 parsed and checked for the selected family, health, age, and complete required
 fields before use. `-R` requests the same synchronized live start with `-e`.
 
+For live operation, acquisition starts with BKG's rolling 24-hour multi-GNSS
+file, updated every 15 minutes. It then falls back through BKG RINEX 4/RINEX 3
+daily merges and independent IGN mirrors. GPS also supports NOAA/NGS and BKG
+legacy daily navigation. Every candidate is checked against the requested
+signal family and scenario epoch before it can replace the local cache.
+
 Examples:
 
 ```sh

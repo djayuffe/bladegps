@@ -45,6 +45,13 @@ The child exit status is checked. Windows requires decompressed input.
 Automatic downloads are fetched to `.tmp`, decompressed, checked, and renamed
 atomically into the working-directory cache.
 
+Live orbit selection uses `toe`, not `toc`, for GPS, Galileo, and BeiDou.
+The seconds-of-week difference is evaluated in the constellation's native
+GPS/GST/BDT scale with week rollover. GLONASS state-vector age is measured from
+its UTC(SU) calendar epoch. GPS records use the advertised fit interval when
+present; malformed, future-by-more-than-30-seconds, stale, or unhealthy records
+are excluded independently for every PRN.
+
 ## Typed navigation record
 
 `gnss_nav_record_t` contains:

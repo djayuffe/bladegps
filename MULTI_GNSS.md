@@ -131,15 +131,17 @@ The profile defaults are safe starting points, not proof that a particular SDR, 
 
 ## Ephemeris acquisition
 
-The GPS downloader tries two daily RINEX 2 GPS sources in order:
+For a live start, the downloader first tries BKG's rolling 24-hour
+`NTRIP/BRDC/brdc_last.rnx.Z` multi-GNSS product. It then tries BKG daily
+`BRD400DLR`, `BRDC00IGS`, `BRDM00DLR`, `BRDC00WRD_R`, and `BRDC00WRD_S`
+products, followed by independent IGN mirrors of the DLR and IGS products.
+GPS has final NOAA/NGS CORS and BKG legacy RINEX 2 fallbacks. Historical
+scenarios skip the rolling product and use date-addressed archives.
 
-1. NOAA/NGS CORS: `https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz`
-2. BKG IGS archive: `https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz`
-
-For Galileo, BeiDou, and GLONASS, the downloader tries the BKG daily
-`BRDC00IGS_R`, `BRDC00WRD_S`, and `BRDM00DLR_S` mixed RINEX products in that
-order. The typed RINEX 3/4 parser then selects only records matching the chosen
-signal profile.
+For Galileo, BeiDou, and GLONASS, every downloaded candidate is parsed before
+it is cached. The typed RINEX 3/4 parser selects only records matching the
+chosen signal profile, rejects unhealthy or out-of-fit ephemerides, and
+requires complete extended GNAV state for GLONASS waveform generation.
 
 ## Validation gates
 

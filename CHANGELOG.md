@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## v1.1.0 - 2026-10-03
+
+- Added BKG's rolling 24-hour multi-GNSS product as the preferred live source;
+  it is refreshed upstream every 15 minutes and remains subject to full local
+  family, health, age, and GLONASS-completeness validation.
+- Expanded daily acquisition to BKG `BRD400DLR`, `BRDC00IGS`, `BRDM00DLR`,
+  receiver/stream WRD merges, independent IGN mirrors, and NOAA/NGS plus BKG
+  legacy GPS fallbacks.
+- Made real-time per-satellite validity use native-system orbit reference time
+  (`toe`) for GPS, Galileo, and BeiDou and the UTC(SU) state-vector epoch for
+  GLONASS. GPS now honours each record's advertised fit interval.
+- Added direct regression coverage for GPS/BDT/GLONASS record-age and fit-window
+  calculations and restored a clean strict `-Wshadow -Wconversion -Werror`
+  build by removing a legacy GPS-path shadowed variable.
 
 - Added wall-clock live mode (`-R`, automatic for download-without-`-t`): host
   UTC is converted to fractional GPS time and sample zero is mapped to a

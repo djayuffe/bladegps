@@ -116,6 +116,32 @@ static void test_coordinate_round_trip(void)
 	assert(fabs(result[2] - llh[2]) < 1.0e-4);
 }
 
+static void test_typed_ephemeris_age(void)
+{
+	gnss_nav_record_t gps={0},beidou={0},glonass={0};
+	gpstime_t now={2200,101000.0};
+	gpstime_t glonass_epoch;
+	gps.system=GNSS_SYSTEM_GPS;gps.model=GNSS_NAV_KEPLERIAN;
+	gps.orbit_count=26U;gps.orbit[8]=100000.0;gps.orbit[25]=6.0;
+	assert(fabs(gnss_nav_record_age(&gps,&now)-1000.0)<1.0e-12);
+	assert(fabs(gnss_nav_record_max_age(&gps)-10800.0)<1.0e-12);
+	gps.orbit[25]=NAN;
+	assert(fabs(gnss_nav_record_max_age(&gps)-7200.0)<1.0e-12);
+
+	beidou.system=GNSS_SYSTEM_BEIDOU;beidou.model=GNSS_NAV_KEPLERIAN;
+	beidou.orbit_count=9U;beidou.orbit[8]=100986.0;
+	assert(fabs(gnss_nav_record_age(&beidou,&now))<1.0e-12);
+	assert(fabs(gnss_nav_record_max_age(&beidou)-14400.0)<1.0e-12);
+
+	glonass.system=GNSS_SYSTEM_GLONASS;
+	glonass.model=GNSS_NAV_GLONASS_STATE_VECTOR;
+	glonass.toc=(gnss_calendar_time_t){2024,1,1,0,0,0.0};
+	assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&glonass.toc,&glonass_epoch)==0);
+	now=glonass_epoch;now.sec+=900.0;normalizeGpsTime(&now);
+	assert(fabs(gnss_nav_record_age(&glonass,&now)-900.0)<1.0e-12);
+	assert(fabs(gnss_nav_record_max_age(&glonass)-1800.0)<1.0e-12);
+}
+
 static void test_ca_code_balance(void)
 {
 	int ca[CA_SEQ_LEN];
@@ -1511,6 +1537,7 @@ static void test_single_gps_runtime_uses_shared_baseband(void)
 int main(void)
 {
 	test_time_conversions();
+	test_typed_ephemeris_age();
 	test_coordinate_round_trip();
 	test_ca_code_balance();
 	test_gps_lnav_word_width();

@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "gnss.h"
+#include "gpssim.h"
 
 #define GNSS_NAV_MESSAGE_NAME_SIZE 8
 #define GNSS_NAV_ORBIT_FIELDS 32
@@ -54,5 +55,16 @@ int gnss_load_rinex_nav(const char *path, gnss_nav_record_t **records,
 /* Return 0 with the last BeiDou Klobuchar model in the file, 1 when none is
  * present, or -1 when a matching record is malformed. */
 int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model);
+
+/* Return the signed age of a broadcast orbit at a continuous GPS epoch.
+ * Keplerian constellations are referenced to toe in their native system week;
+ * GLONASS state vectors are referenced to their UTC(SU) epoch. */
+double gnss_nav_record_age(const gnss_nav_record_t *record,
+	const gpstime_t *gps_time);
+
+/* Maximum supported age after the reference epoch.  GPS honours the RINEX fit
+ * interval when present; the other services use their broadcast refresh
+ * windows.  A negative result denotes malformed timing metadata. */
+double gnss_nav_record_max_age(const gnss_nav_record_t *record);
 
 #endif

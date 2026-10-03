@@ -296,13 +296,12 @@ static int downloaded_nav_supports_signal(const char *path,gnss_signal_t signal,
 	if(gnss_load_rinex_nav(path,&records,&count)!=0)return 0;
 	for(index=0U;index<count;index++) {
 		const gnss_nav_record_t *record=&records[index];
-		gpstime_t epoch;
 		double age=0.0;
 		if(!downloaded_record_healthy(record))continue;
 		if(required_time!=NULL) {
-			if(gnss_calendar_to_gps(record->system,&record->toc,&epoch)!=0)continue;
-			age=gnss_time_difference(required_time,&epoch);
-			if(age< -30.0||age>(record->system==GNSS_SYSTEM_GLONASS?1800.0:14400.0))
+			double maximum_age=gnss_nav_record_max_age(record);
+			age=gnss_nav_record_age(record,required_time);
+			if(!isfinite(age)||maximum_age<0.0||age< -30.0||age>maximum_age)
 				continue;
 		}
 		if(record->system==GNSS_SYSTEM_GPS&&strcmp(record->message,"LNAV")==0)
@@ -334,15 +333,16 @@ static int downloaded_nav_supports_signal(const char *path,gnss_signal_t signal,
 static int download_broadcast_ephemeris(const datetime_t *date,
 	gnss_signal_t signal,const gpstime_t *required_time,char *navfile,size_t navfile_size)
 {
+	typedef struct { const char *name; char url[320]; } nav_source_t;
 	int doy;
 	int yy;
 	char out_path[MAX_CHAR];
 	char gz_path[MAX_CHAR];
 	char tmp_gz_path[MAX_CHAR + 8];
 	char tmp_out_path[MAX_CHAR + 8];
-	char urls[4][256];
+	nav_source_t sources[12];
 	char cmd[768];
-	size_t source,source_count;
+	size_t source,source_count=0U;
 	int downloaded = 0;
 
 	doy = day_of_year(date);
@@ -373,35 +373,54 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 	if (snprintf(tmp_out_path, sizeof(tmp_out_path), "%s.tmp", out_path) >= (int)sizeof(tmp_out_path))
 		return -1;
 
-	if (signal == GNSS_SIGNAL_GPS_L1CA) {
-		if (snprintf(urls[0], sizeof(urls[0]),
+#define ADD_SOURCE(label,...) do { \
+	if(source_count>=sizeof(sources)/sizeof(sources[0]))return -1; \
+	sources[source_count].name=(label); \
+	if(snprintf(sources[source_count].url,sizeof(sources[source_count].url), \
+		__VA_ARGS__)>=(int)sizeof(sources[source_count].url))return -1; \
+	source_count++; \
+} while(0)
+	/* The rolling BKG product is generated from the BCEP real-time stream and
+	 * refreshed every 15 minutes.  Content validation below prevents its use
+	 * for historical scenarios or when a required constellation is absent. */
+	if(required_time!=NULL)
+		ADD_SOURCE("BKG rolling 24-hour multi-GNSS",
+			"https://igs.bkg.bund.de/root_ftp/NTRIP/BRDC/brdc_last.rnx.Z");
+	ADD_SOURCE("BKG/DLR RINEX 4 multi-GNSS",
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRD400DLR_S_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("BKG/IGS merged multi-GNSS",
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00IGS_R_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("BKG/DLR RINEX 3 multi-GNSS",
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDM00DLR_S_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("BKG worldwide receiver merge",
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_R_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("BKG worldwide stream merge",
+		"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	/* IGN is an independent IGS data centre.  curl negotiates FTP passively;
+	 * these mirrors remain useful when the BKG HTTPS endpoint is unavailable. */
+	ADD_SOURCE("IGN/DLR RINEX 4 mirror",
+		"ftp://igs.ign.fr/pub/igs/data/%04d/%03d/BRD400DLR_S_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("IGN/IGS merged mirror",
+		"ftp://igs.ign.fr/pub/igs/data/%04d/%03d/BRDC00IGS_R_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	ADD_SOURCE("IGN/DLR RINEX 3 mirror",
+		"ftp://igs.ign.fr/pub/igs/data/%04d/%03d/BRDM00DLR_S_%04d%03d0000_01D_MN.rnx.gz",
+		date->y,doy,date->y,doy);
+	if(signal==GNSS_SIGNAL_GPS_L1CA) {
+		ADD_SOURCE("NOAA/NGS GPS legacy",
 			"https://geodesy.noaa.gov/corsdata/rinex/%04d/%03d/brdc%03d0.%02dn.gz",
-			date->y, doy, doy, yy) >= (int)sizeof(urls[0]) ||
-			snprintf(urls[1], sizeof(urls[1]),
+			date->y,doy,doy,yy);
+		ADD_SOURCE("BKG GPS legacy",
 			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/brdc%03d0.%02dn.gz",
-			date->y, doy, doy, yy) >= (int)sizeof(urls[1]) ||
-			snprintf(urls[2],sizeof(urls[2]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_R_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy)>=(int)sizeof(urls[2]) ||
-			snprintf(urls[3],sizeof(urls[3]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy)>=(int)sizeof(urls[3])) return -1;
-		source_count=4U;
-	} else {
-		if (snprintf(urls[0], sizeof(urls[0]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00IGS_R_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy) >= (int)sizeof(urls[0]) ||
-			snprintf(urls[1], sizeof(urls[1]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_R_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy) >= (int)sizeof(urls[1]) ||
-			snprintf(urls[2], sizeof(urls[2]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy) >= (int)sizeof(urls[2]) ||
-			snprintf(urls[3], sizeof(urls[3]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDM00DLR_S_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy) >= (int)sizeof(urls[3])) return -1;
-		source_count=4U;
+			date->y,doy,doy,yy);
 	}
+#undef ADD_SOURCE
 
 	remove(tmp_gz_path);
 	remove(tmp_out_path);
@@ -418,12 +437,12 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 
 	for (source = 0; source < source_count; source++) {
 		int legacy_glonass_only=0;
-		printf("Downloading broadcast ephemeris from source %zu/%zu: %s\n",
-			source + 1,source_count,urls[source]);
+		printf("Downloading broadcast ephemeris from source %zu/%zu (%s): %s\n",
+			source + 1,source_count,sources[source].name,sources[source].url);
 		remove(tmp_gz_path);
 		if (snprintf(cmd, sizeof(cmd),
-			"curl -fL --retry 2 --connect-timeout 15 -o \"%s\" \"%s\"",
-			tmp_gz_path, urls[source]) >= (int)sizeof(cmd))
+			"curl -fL --retry 3 --retry-delay 1 --connect-timeout 15 --max-time 120 -o \"%s\" \"%s\"",
+			tmp_gz_path, sources[source].url) >= (int)sizeof(cmd))
 			goto fail;
 		if (run_command(cmd, "download broadcast ephemeris") == 0 && file_exists(tmp_gz_path)) {
 			remove(tmp_out_path);

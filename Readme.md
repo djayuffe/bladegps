@@ -41,9 +41,9 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
   round trips, and integer-derived 10 Hz scenario ticks without cumulative drift.
 - Per-satellite transmit-time navigation-symbol/overlay alignment.
 - Satellite clock bias, relativistic correction, signal group delay, and clock-drift modeling.
-- Automatic daily broadcast download with NOAA/NGS and BKG legacy/mixed
-  fallbacks, content parsing, signal-family/health/age validation, and a
-  previous-day live fallback when `-e` is omitted.
+- Automatic live/daily broadcast download through BKG rolling and merged
+  products, independent IGN mirrors, and NOAA/NGS/BKG GPS legacy fallbacks,
+  with content, signal-family, health, orbit-age, and completeness validation.
 - Capability-driven bladeRF 1.0/2.0 adaptation for center frequency, exact sample rate, analog bandwidth, and portable overall TX gain.
 - Hardware range checks and configuration read-back before RF transmission.
 - Analog-filter validation against the complete occupied signal span, including an offset carrier.
@@ -155,7 +155,17 @@ Automatic ephemeris download example:
 ./bladegps -l 59.3293,18.0686,30 -d 60
 ```
 
-When `-e` is omitted, GPS tries NOAA/NGS and BKG legacy data, then BKG WRD mixed products. Other profiles try BKG `BRDC00IGS`, `BRDC00WRD_R`, `BRDC00WRD_S`, and `BRDM00DLR`. A cached or downloaded file is reused only after parsing proves that it contains healthy, in-age records usable by the selected profile. Without `-t`, automatic download also enables live mode: sample zero represents current UTC converted to GPS time plus a five-second generation lead and is scheduled onto the matching future FPGA timestamp. `-R` enables the same behavior with a supplied `-e` file. The host UTC clock must be synchronized.
+When `-e` is omitted for a live start, bladeGPS first tries BKG's rolling
+24-hour multi-GNSS navigation product, which BKG refreshes every 15 minutes.
+Daily fallbacks include BKG's comprehensive DLR RINEX 4 product,
+`BRDC00IGS`, `BRDM00DLR`, and the WRD receiver/stream merges, followed by
+independent IGN mirrors. GPS additionally falls back to NOAA/NGS and BKG
+legacy RINEX 2 files. A cached or downloaded file is reused only after parsing
+proves that it contains healthy, in-age records usable by the selected profile.
+Without `-t`, automatic download also enables live mode: sample zero represents
+current UTC converted to GPS time plus a five-second generation lead and is
+scheduled onto the matching future FPGA timestamp. `-R` enables the same
+behavior with a supplied `-e` file. The host UTC clock must be synchronized.
 
 The downloader writes to temporary `.tmp` files, decompresses and parses every candidate, checks signal family, health, extended GLONASS usability, and scenario age, then atomically promotes only a usable result. For a live start it can try the preceding UTC day. Failed or stale products are never reported as successful downloads.
 
@@ -334,7 +344,9 @@ physical hardware and receiver certification remain environment-dependent.
 - Every block epoch is derived from the immutable start plus an integer 10 Hz
   tick; repeated binary `0.1` addition cannot drift across a symbol boundary.
 - The newest healthy in-fit broadcast record already in force is selected independently per constellation/PRN; unhealthy or arbitrary future records cannot mask usable data.
-- Record age is compared in continuous GPS time after native GPS/GST/BDT/UTC conversion.
+- Keplerian ephemeris age is measured from the broadcast orbit reference time
+  (`toe`) in the native GPS/GST/BDT week. GLONASS age is measured from its
+  UTC(SU) state-vector epoch. GPS fit intervals are honoured when present.
 - Navigation data and overlay phases use iterative per-satellite transmit time rather than receiver time.
 - Primary-code, navigation-symbol, and secondary/NH overlay clocks share the
   same per-satellite Doppler scale, preserving component alignment in motion.
@@ -349,7 +361,8 @@ physical hardware and receiver certification remain environment-dependent.
 - Generation completion wakes both FIFO condition variables so shutdown and initialization failures do not deadlock waiting threads.
 - Command-line path arguments are bounded to the internal `MAX_CHAR` buffers.
 - Malformed NMEA GGA lines are skipped instead of crashing the parser.
-- If `-e` is omitted, GPS tries NOAA/NGS and BKG RINEX 2 data; non-GPS profiles try three BKG mixed-RINEX daily products.
+- Automatic acquisition uses the live BKG rolling product, five BKG daily
+  merged products, three IGN mirrors, and two additional GPS legacy fallbacks.
 - Auto-downloaded ephemeris cache files are ignored by git so local runs do not dirty the repository.
 - The full module map, data flow, threading model, FIFO behavior, downloader lifecycle, and extension points are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 

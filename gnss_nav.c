@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gnss_time.h"
+
 #ifndef _WIN32
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -15,6 +17,45 @@
 
 #define NAV_LINE_SIZE 256
 #define RINEX_FIELD_WIDTH 19U
+
+static double wrap_week_difference(double seconds)
+{
+	while(seconds>302400.0)seconds-=604800.0;
+	while(seconds< -302400.0)seconds+=604800.0;
+	return seconds;
+}
+
+double gnss_nav_record_age(const gnss_nav_record_t *record,
+	const gpstime_t *gps_time)
+{
+	gpstime_t reference,system_time;
+	if(record==NULL||gps_time==NULL||gps_time->week<0||!isfinite(gps_time->sec))
+		return NAN;
+	if(record->model==GNSS_NAV_GLONASS_STATE_VECTOR) {
+		if(gnss_calendar_to_gps(record->system,&record->toc,&reference)!=0)return NAN;
+		return gnss_time_difference(gps_time,&reference);
+	}
+	if(record->model!=GNSS_NAV_KEPLERIAN||record->orbit_count<=8U||
+		!isfinite(record->orbit[8])||record->orbit[8]<0.0||
+		record->orbit[8]>=604800.0||
+		gnss_gps_to_system_time(record->system,gps_time,&system_time)!=0)return NAN;
+	return wrap_week_difference(system_time.sec-record->orbit[8]);
+}
+
+double gnss_nav_record_max_age(const gnss_nav_record_t *record)
+{
+	double fit_hours;
+	if(record==NULL)return -1.0;
+	if(record->system==GNSS_SYSTEM_GLONASS)return 1800.0;
+	if(record->system==GNSS_SYSTEM_GPS) {
+		fit_hours=record->orbit_count>25U&&isfinite(record->orbit[25])&&
+			record->orbit[25]>0.0?record->orbit[25]:4.0;
+		return fit_hours*1800.0;
+	}
+	if(record->system==GNSS_SYSTEM_GALILEO||record->system==GNSS_SYSTEM_BEIDOU)
+		return 14400.0;
+	return -1.0;
+}
 
 typedef struct {
 	FILE *file;

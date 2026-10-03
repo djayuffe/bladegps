@@ -2509,11 +2509,11 @@ void *gps_task(void *arg)
 			if (chan[i].prn>0)
 			{
 				// Refresh code phase and data bit counters
-				int sv = chan[i].prn-1;
+				int channel_sv = chan[i].prn-1;
 				range_t rho;
 
 				// Current pseudorange
-				computeRange(&rho, current_eph[sv], grx, xyz[iumd]);
+				computeRange(&rho, current_eph[channel_sv], grx, xyz[iumd]);
 				chan[i].azel[0] = rho.azel[0];
 				chan[i].azel[1] = rho.azel[1];
 
