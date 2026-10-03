@@ -37,9 +37,13 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Per-satellite ephemeris selection and seamless 30-second ephemeris refresh.
 - Iterative signal transit-time and Earth-rotation (Sagnac) correction.
 - GPS/GST/BDT/GLONASS-UTC conversion with historical leap-second handling.
+- Fraction-preserving GPS-to-UTC conversion, including explicit `23:59:60.x`
+  round trips, and integer-derived 10 Hz scenario ticks without cumulative drift.
 - Per-satellite transmit-time navigation-symbol/overlay alignment.
 - Satellite clock bias, relativistic correction, signal group delay, and clock-drift modeling.
-- Automatic daily GPS broadcast ephemeris download with NOAA/NGS primary and BKG IGS fallback sources when `-e` is omitted.
+- Automatic daily broadcast download with NOAA/NGS and BKG legacy/mixed
+  fallbacks, content parsing, signal-family/health/age validation, and a
+  previous-day live fallback when `-e` is omitted.
 - Capability-driven bladeRF 1.0/2.0 adaptation for center frequency, exact sample rate, analog bandwidth, and portable overall TX gain.
 - Hardware range checks and configuration read-back before RF transmission.
 - Analog-filter validation against the complete occupied signal span, including an offset carrier.
@@ -111,7 +115,7 @@ List the known signal profiles before configuring a run:
 ./bladegps -L
 ```
 
-The status column is authoritative. Non-GPS profiles use a supplied mixed RINEX 3/4 file or auto-download a daily mixed file when `-e` is omitted. Complete GLONASS GNAV generation requires a RINEX 4 FDMA record because legacy RINEX 3 records omit four status/timing fields; bladeGPS refuses to fabricate them.
+The status column is authoritative. Non-GPS profiles use a supplied mixed RINEX 3/4 file or auto-download a daily mixed file when `-e` is omitted. Complete GLONASS GNAV requires populated extended FDMA fields. RINEX 4 supplies them; RINEX 3.05 Orbit-4 is accepted when populated, while daily files containing blank/sentinel fields are rejected rather than fabricated.
 
 ```text
 Usage: bladegps [options]
@@ -122,6 +126,7 @@ Options:
   -g <nmea_gga>    NMEA GGA stream (dynamic mode)
   -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100
   -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss
+  -R               Use current UTC/GPS time and align sample zero to the wall clock
   -d <duration>    Duration [sec] (max: 86400)
   -x <XB number>   Enable XB board, e.g. '-x 200' for XB200
   -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of, mixed-open)
@@ -150,9 +155,9 @@ Automatic ephemeris download example:
 ./bladegps -l 59.3293,18.0686,30 -d 60
 ```
 
-When `-e` is omitted, GPS downloads daily RINEX 2 navigation from NOAA/NGS CORS and then BKG. Galileo, BeiDou, and GLONASS try BKG's daily `BRDC00IGS`, `BRDC00WRD`, and `BRDM00DLR` mixed-navigation products in order. The downloader uses the `-t` scenario date if provided, otherwise the current UTC date, saves the decompressed file in the working directory, and reuses it on later runs.
+When `-e` is omitted, GPS tries NOAA/NGS and BKG legacy data, then BKG WRD mixed products. Other profiles try BKG `BRDC00IGS`, `BRDC00WRD_R`, `BRDC00WRD_S`, and `BRDM00DLR`. A cached or downloaded file is reused only after parsing proves that it contains healthy, in-age records usable by the selected profile. Without `-t`, automatic download also enables live mode: sample zero represents current UTC converted to GPS time plus a five-second generation lead and is scheduled onto the matching future FPGA timestamp. `-R` enables the same behavior with a supplied `-e` file. The host UTC clock must be synchronized.
 
-The downloader writes to temporary `.tmp` files first, verifies that both the compressed and decompressed files were created, then renames them into place. Failed downloads or decompression errors clean up partial output and print a manual `-e <nav_file>` fallback hint.
+The downloader writes to temporary `.tmp` files, decompresses and parses every candidate, checks signal family, health, extended GLONASS usability, and scenario age, then atomically promotes only a usable result. For a live start it can try the preceding UTC day. Failed or stale products are never reported as successful downloads.
 
 Galileo example using a mixed RINEX 3/4 navigation file:
 
@@ -326,6 +331,8 @@ physical hardware and receiver certification remain environment-dependent.
 
 - The simulator generates 0.1 second blocks at the selected sample rate for bladeRF SC16 transmission; GPS defaults to 2.6 Msps.
 - The requested duration emits the complete number of 100 ms blocks.
+- Every block epoch is derived from the immutable start plus an integer 10 Hz
+  tick; repeated binary `0.1` addition cannot drift across a symbol boundary.
 - The newest healthy in-fit broadcast record already in force is selected independently per constellation/PRN; unhealthy or arbitrary future records cannot mask usable data.
 - Record age is compared in continuous GPS time after native GPS/GST/BDT/UTC conversion.
 - Navigation data and overlay phases use iterative per-satellite transmit time rather than receiver time.

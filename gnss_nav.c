@@ -251,6 +251,21 @@ static int skip_rinex4_record(FILE *stream, char next_record[NAV_LINE_SIZE])
 	return ferror(stream) ? -1 : 1;
 }
 
+static int skip_unsupported_rinex3_record(FILE *stream,char system)
+{
+	char line[NAV_LINE_SIZE];
+	size_t continuation,index;
+	/* RINEX 3 mixed files routinely include constellations this generator does
+	 * not synthesize.  Their records must be skipped, not allowed to invalidate
+	 * otherwise usable GPS/Galileo/BeiDou/GLONASS data. */
+	if(system=='S')continuation=3U;       /* SBAS state vector */
+	else if(system=='J'||system=='I')continuation=7U; /* QZSS/NavIC Kepler */
+	else return -1;
+	for(index=0U;index<continuation;index++)
+		if(fgets(line,sizeof(line),stream)==NULL)return -1;
+	return 0;
+}
+
 int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	size_t capacity, size_t *record_count)
 {
@@ -261,6 +276,7 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 	double version = 0.0;
 	int header_done = 0;
 	int have_pending_line = 0;
+	int input_exhausted = 0;
 	size_t count = 0;
 
 	if (path == NULL || record_count == NULL ||
@@ -289,6 +305,7 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 		int rinex2;
 		int rinex4;
 
+		if(input_exhausted)break;
 		if (have_pending_line) {
 			strcpy(line, pending_line);
 			have_pending_line = 0;
@@ -300,6 +317,10 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 
 		if (line[0] == '\n' || line[0] == '\r')
 			continue;
+		if(!rinex2&&!rinex4&&line[0]!='G'&&line[0]!='E'&&line[0]!='C'&&line[0]!='R') {
+			if(skip_unsupported_rinex3_record(stream,line[0])!=0)goto fail;
+			continue;
+		}
 		memset(&record, 0, sizeof(record));
 		strcpy(record.message, "LEGACY");
 		if (rinex4) {
@@ -353,6 +374,17 @@ int gnss_read_rinex_nav(const char *path, gnss_nav_record_t *records,
 			if (fgets(line, sizeof(line), stream) == NULL ||
 				parse_orbit_line(line, &record, field_count, rinex2 ? 3U : 4U) != 0)
 				goto fail;
+		}
+		/* RINEX 3.05 permits an optional fourth GLONASS continuation line.
+		 * Some producers omit it entirely, so look ahead without consuming the
+		 * next satellite epoch when it is absent. */
+		if(!rinex2&&!rinex4&&version>=3.05&&record.system==GNSS_SYSTEM_GLONASS) {
+			if(fgets(line,sizeof(line),stream)!=NULL) {
+				if(line[0]==' ') {
+					if(parse_orbit_line(line,&record,4U,4U)!=0)goto fail;
+				} else {strcpy(pending_line,line);have_pending_line=1;}
+			} else if(ferror(stream))goto fail;
+			else input_exhausted=1;
 		}
 		if(!rinex2&&!rinex4&&infer_rinex3_message(&record)!=0)
 			goto fail;
@@ -426,7 +458,7 @@ int gnss_read_beidou_ionosphere(const char *path, gnss_klobuchar_t *model)
 	if(nav_stream_open(path,&source)!=0)return -1;
 	stream=source.file;
 	while(fgets(line,sizeof(line),stream)!=NULL) {
-		if(strncmp(line,"BDSA",4U)==0) {
+		if(strncmp(line,"BDSA",4U)==0&& !have_alpha) {
 			if(parse_four_values(line+4U,alpha)!=0)goto malformed;
 			have_alpha=1;
 		} else if(strncmp(line,"BDSB",4U)==0) {

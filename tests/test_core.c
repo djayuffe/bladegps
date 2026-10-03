@@ -59,6 +59,7 @@ static void test_time_conversions(void)
 		gnss_calendar_time_t ordinary={2021,7,5,2,0,0.0};
 		gnss_calendar_time_t false_leap={2016,12,30,23,59,60.0};
 		gnss_calendar_time_t false_hour={2016,12,31,22,59,60.0};
+		gnss_calendar_time_t round_trip;
 		gpstime_t gb,gl,ga,gps,galileo,beidou,glonass;
 		int offset;
 		assert(gnss_gps_utc_offset(&before,&offset)==0 && offset==17);
@@ -70,6 +71,18 @@ static void test_time_conversions(void)
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&false_hour,&ga)==-1);
 		assert(fabs(gnss_time_difference(&gl,&gb)-1.0)<1.0e-12);
 		assert(fabs(gnss_time_difference(&ga,&gl)-1.0)<1.0e-12);
+		assert(gnss_gps_to_utc_calendar(&gb,&round_trip)==0);
+		assert(round_trip.year==2016&&round_trip.month==12&&round_trip.day==31&&
+			round_trip.hour==23&&round_trip.minute==59&&fabs(round_trip.second-59.0)<1.0e-12);
+		assert(gnss_gps_to_utc_calendar(&gl,&round_trip)==0);
+		assert(round_trip.year==2016&&round_trip.month==12&&round_trip.day==31&&
+			round_trip.hour==23&&round_trip.minute==59&&fabs(round_trip.second-60.0)<1.0e-12);
+		assert(gnss_gps_to_utc_calendar(&ga,&round_trip)==0);
+		assert(round_trip.year==2017&&round_trip.month==1&&round_trip.day==1&&
+			round_trip.hour==0&&round_trip.minute==0&&fabs(round_trip.second)<1.0e-12);
+		gl.sec+=0.75;
+		assert(gnss_gps_to_utc_calendar(&gl,&round_trip)==0&&
+			fabs(round_trip.second-60.75)<1.0e-12);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GPS,&ordinary,&gps)==0);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_GALILEO,&ordinary,&galileo)==0);
 		assert(gnss_calendar_to_gps(GNSS_SYSTEM_BEIDOU,&ordinary,&beidou)==0);
@@ -81,6 +94,12 @@ static void test_time_conversions(void)
 		assert(gnss_time_difference(&galileo,&gps)==0.0);
 		assert(gnss_gps_to_system_time(GNSS_SYSTEM_GLONASS,&glonass,&galileo)==0);
 		assert(gnss_time_difference(&galileo,&gps)==0.0);
+	}
+	{
+		gpstime_t fractional={2200,604799.75};
+		datetime_t calendar;
+		gps2date(&fractional,&calendar);
+		assert(calendar.hh==23&&calendar.mm==59&&fabs(calendar.sec-59.75)<1.0e-12);
 	}
 }
 
@@ -1293,6 +1312,16 @@ static void test_rinex4_mixed_navigation(void)
 	assert(gnss_glonass_gnav_from_rinex(&records[2],&glonass_immediate)==-1);
 }
 
+static void test_rinex305_mixed_record_alignment(void)
+{
+	gnss_nav_record_t records[2];
+	size_t count=0U;
+	assert(gnss_read_rinex_nav("tests/rinex305_mixed_skip.nav",records,2U,&count)==0);
+	assert(count==2U);
+	assert(records[0].system==GNSS_SYSTEM_GPS&&records[0].orbit_count==28U);
+	assert(records[1].system==GNSS_SYSTEM_GLONASS&&records[1].orbit_count==16U);
+}
+
 #ifndef _WIN32
 static void test_nonseekable_rinex4_navigation(void)
 {
@@ -1509,6 +1538,7 @@ int main(void)
 	test_timed_motion_resampling();
 	test_nmea_motion_validation();
 	test_rinex4_mixed_navigation();
+	test_rinex305_mixed_record_alignment();
 #ifndef _WIN32
 	test_nonseekable_rinex4_navigation();
 #endif

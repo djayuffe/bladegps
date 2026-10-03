@@ -199,7 +199,8 @@ void *gnss_task(void *argument)
 	const gnss_signal_profile_t *profile=gnss_signal_profile(sim->opt.signal);
 	double **xyz=NULL,*xyz_data=NULL,receiver_velocity[3]={0},live_offset[3]={0};
 	int16_t *iq=NULL; size_t record_count=0U,selected[RF_CHANNELS],selected_count;
-	int numd,step,error=1,direction=UNDEF; double interactive_velocity=0.0; gpstime_t time=sim->opt.g0;
+	int numd,step,error=1,direction=UNDEF; double interactive_velocity=0.0;
+	gpstime_t time=sim->opt.g0,scenario_start;
 	int8_t iono_alpha[4]={0},iono_beta[4]={0};
 	motion_controller_t controller={0};
 	const char *failure="unknown GNSS producer error";
@@ -239,12 +240,17 @@ void *gnss_task(void *argument)
 		}
 		if(!usable){failure="navigation file has no healthy in-age record for the selected signal and start time";goto done;}
 	}
+	scenario_start=time;
 	for(step=0;step<numd&&!generation_finished(sim);step++) {
 		size_t best[GNSS_SYSTEM_COUNT][MAX_GNSS_PRN+1U],n,candidate_count=0U;
 		double best_age[GNSS_SYSTEM_COUNT][MAX_GNSS_PRN+1U];gnss_system_t system;
 		for(system=GNSS_SYSTEM_GPS;system<GNSS_SYSTEM_COUNT;system++)for(n=0;n<=MAX_GNSS_PRN;n++){
 			best[system][n]=SIZE_MAX;best_age[system][n]=HUGE_VAL;}
 		if(stop_was_requested())break;
+		/* Derive each epoch from the immutable start and integer 10 Hz tick.
+		 * Repeatedly adding binary 0.1 accumulated enough error in long runs to
+		 * move exact data/page boundaries by one sample. */
+		time=scenario_start;time.sec+=(double)step/10.0;normalizeGpsTime(&time);
 		if(step>0&&(sim->opt.interactive||controller.active)) {
 			double neu_velocity[3]={0.0,0.0,0.0};
 			if(sim->opt.interactive) {
@@ -284,14 +290,20 @@ void *gnss_task(void *argument)
 			/* Prefer the newest healthy record already in force.  A small future
 			 * tolerance accommodates files whose integer epoch is rounded at a
 			 * message boundary without selecting an arbitrary future ephemeris. */
-			if(age>=-30.0 && fabs(age)<best_age[records[n].system][records[n].prn]){
-				best_age[records[n].system][records[n].prn]=fabs(age);
+			if((age>=0.0&&(best[records[n].system][records[n].prn]==SIZE_MAX||
+				best_age[records[n].system][records[n].prn]<0.0||
+				age<best_age[records[n].system][records[n].prn]))||
+				(age<0.0&&age>=-30.0&&
+				(best[records[n].system][records[n].prn]==SIZE_MAX||
+				(best_age[records[n].system][records[n].prn]<0.0&&
+				age>best_age[records[n].system][records[n].prn])))){
+				best_age[records[n].system][records[n].prn]=age;
 				best[records[n].system][records[n].prn]=n;
 			}
 		}
 		if(step>0)for(n=0;n<3U;n++)receiver_velocity[n]=(xyz[step][n]-xyz[step-1][n])*10.0;
 		for(system=GNSS_SYSTEM_GPS;system<GNSS_SYSTEM_COUNT;system++)for(n=1;n<=MAX_GNSS_PRN;n++)
-			if(best[system][n]!=SIZE_MAX&&best_age[system][n]<=
+			if(best[system][n]!=SIZE_MAX&&best_age[system][n]>=-30.0&&best_age[system][n]<=
 			(records[best[system][n]].system==GNSS_SYSTEM_GLONASS?1800.0:14400.0)){
 			size_t record_index=best[system][n];gnss_signal_t signal=record_signal(&records[record_index]);
 			const gnss_signal_profile_t *channel_profile=gnss_signal_profile(signal);
@@ -353,7 +365,6 @@ void *gnss_task(void *argument)
 		memcpy(&sim->fifo[sim->head*2],iq,sim->iq_block_samples*2U*sizeof(*iq));sim->head+=(long)sim->iq_block_samples;
 		if((size_t)sim->head>=sim->fifo_length)sim->head-=(long)sim->fifo_length;
 		pthread_cond_signal(&sim->fifo_read_ready);pthread_mutex_unlock(&sim->gps.lock);
-		time.sec+=0.1;normalizeGpsTime(&time);
 	}
 	error=0;
 done:

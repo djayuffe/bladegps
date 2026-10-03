@@ -116,6 +116,38 @@ static int gps_utc_offset_from_gps(const gpstime_t *gps)
 	return offset;
 }
 
+int gnss_gps_to_utc_calendar(const gpstime_t *gps,
+	gnss_calendar_time_t *utc)
+{
+	gpstime_t normalized,linear;
+	datetime_t civil;
+	size_t index;
+	int offset;
+	if(gps==NULL||utc==NULL||gps->week<0||!isfinite(gps->sec))return -1;
+	normalized=*gps;normalizeGpsTime(&normalized);
+	/* A leap second occupies the GPS interval immediately before the effective
+	 * UTC midnight threshold.  Linear civil time has no representation for
+	 * that interval, so identify it before applying the ordinary offset. */
+	for(index=0U;index<sizeof(leap_epochs)/sizeof(leap_epochs[0]);index++) {
+		datetime_t effective={leap_epochs[index].year,leap_epochs[index].month,
+			leap_epochs[index].day,0,0,0.0};
+		gpstime_t threshold,previous;
+		double delta;
+		date2gps(&effective,&threshold);add_seconds(&threshold,(double)(index+1U));
+		delta=gnss_time_difference(&normalized,&threshold);
+		if(delta>=-1.0&&delta<0.0) {
+			previous=threshold;add_seconds(&previous,-(double)(index+1U)-1.0);
+			gps2date(&previous,&civil);
+			*utc=(gnss_calendar_time_t){civil.y,civil.m,civil.d,23,59,60.0+delta+1.0};
+			return 0;
+		}
+	}
+	offset=gps_utc_offset_from_gps(&normalized);
+	linear=normalized;add_seconds(&linear,-(double)offset);gps2date(&linear,&civil);
+	*utc=(gnss_calendar_time_t){civil.y,civil.m,civil.d,civil.hh,civil.mm,civil.sec};
+	return calendar_valid(utc)?0:-1;
+}
+
 int gnss_gps_to_system_time(gnss_system_t system,
 	const gpstime_t *gps, gpstime_t *system_time)
 {

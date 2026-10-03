@@ -39,6 +39,8 @@
 #define SAMPLES_PER_BUFFER	(32 * 1024)
 #define NUM_TRANSFERS		16
 #define TIMEOUT_MS			1000
+#define REALTIME_START_LEAD_SECONDS 5.0
+#define REALTIME_TIMEOUT_MS 8000
 
 
 // Interactive mode directions
@@ -81,6 +83,7 @@ typedef struct {
 	double llh[3];
 	int interactive;
 	int controller_index;
+	int realtime_start;
 } option_t;
 
 typedef struct {
@@ -96,6 +99,7 @@ typedef struct {
 	bladerf_timestamp start_timestamp;
 	bladerf_timestamp end_timestamp;
 	double host_elapsed_seconds;
+	double realtime_target_unix_seconds;
 	int hardware_timeline_valid;
 	int hardware_drain_complete;
 } tx_t;

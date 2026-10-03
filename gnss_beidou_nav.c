@@ -24,7 +24,10 @@ int gnss_beidou_ionosphere_quantize(const gnss_klobuchar_t *model,
 		if(!isfinite(a)||!isfinite(b)||a<-128.0||a>127.0||b<-128.0||b>127.0)
 			return -1;
 		qa=lround(a);qb=lround(b);
-		if(fabs(a-(double)qa)>1.0e-6||fabs(b-(double)qb)>1.0e-6)return -1;
+		/* RINEX 3 headers commonly print these already-quantized values with
+		 * only five significant digits.  Allow the resulting sub-LSB decimal
+		 * formatting error, but still reject values not close to an ICD grid. */
+		if(fabs(a-(double)qa)>1.0e-2||fabs(b-(double)qb)>1.0e-2)return -1;
 		alpha[index]=(int8_t)qa;beta[index]=(int8_t)qb;
 	}
 	return 0;

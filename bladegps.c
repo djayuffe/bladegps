@@ -182,6 +182,19 @@ static int day_of_year(const datetime_t *date)
 	return doy + date->d;
 }
 
+static int previous_utc_day(datetime_t *date)
+{
+	static const int month_days[]={31,28,31,30,31,30,31,31,30,31,30,31};
+	int days;
+	if(date==NULL||day_of_year(date)<1)return -1;
+	date->d--;
+	if(date->d>0)return 0;
+	date->m--;
+	if(date->m==0){date->m=12;date->y--;}
+	days=month_days[date->m-1]+(date->m==2&&is_leap_year(date->y));
+	date->d=days;return 0;
+}
+
 static int utc_today(datetime_t *date)
 {
 	time_t now;
@@ -213,8 +226,113 @@ static int utc_today(datetime_t *date)
 	return 0;
 }
 
+static int wallclock_seconds(double *seconds)
+{
+	if(seconds==NULL)return -1;
+#ifdef _WIN32
+	{
+		FILETIME file_time;
+		ULARGE_INTEGER ticks;
+		GetSystemTimeAsFileTime(&file_time);
+		ticks.LowPart=file_time.dwLowDateTime;ticks.HighPart=file_time.dwHighDateTime;
+		if(ticks.QuadPart<UINT64_C(116444736000000000))return -1;
+		*seconds=(double)(ticks.QuadPart-UINT64_C(116444736000000000))/1.0e7;
+	}
+#else
+	{
+		struct timespec now;
+		if(clock_gettime(CLOCK_REALTIME,&now)!=0)return -1;
+		*seconds=(double)now.tv_sec+(double)now.tv_nsec/1.0e9;
+	}
+#endif
+	return isfinite(*seconds)?0:-1;
+}
+
+static int utc_now_gps(gpstime_t *gps,double *unix_seconds)
+{
+	double now;
+	time_t whole;
+	struct tm utc_tm;
+	gnss_calendar_time_t utc;
+#ifdef _WIN32
+	struct tm *result;
+#endif
+	if(gps==NULL||wallclock_seconds(&now)!=0)return -1;
+	whole=(time_t)floor(now);
+#ifdef _WIN32
+	result=gmtime(&whole);if(result==NULL)return -1;utc_tm=*result;
+#else
+	if(gmtime_r(&whole,&utc_tm)==NULL)return -1;
+#endif
+	utc=(gnss_calendar_time_t){utc_tm.tm_year+1900,utc_tm.tm_mon+1,utc_tm.tm_mday,
+		utc_tm.tm_hour,utc_tm.tm_min,(double)utc_tm.tm_sec+(now-floor(now))};
+	if(gnss_calendar_to_gps(GNSS_SYSTEM_GLONASS,&utc,gps)!=0)return -1;
+	if(unix_seconds!=NULL)*unix_seconds=now;
+	return 0;
+}
+
+static int downloaded_record_healthy(const gnss_nav_record_t *record)
+{
+	double value;
+	long encoded;
+	if(record->system==GNSS_SYSTEM_GPS)value=record->orbit[21];
+	else if(record->system==GNSS_SYSTEM_GALILEO)value=record->orbit[20];
+	else if(record->system==GNSS_SYSTEM_BEIDOU)value=record->orbit[21];
+	else value=record->orbit[3];
+	if(!isfinite(value))return 0;encoded=lround(value);
+	if(fabs(value-(double)encoded)>1.0e-6||encoded<0)return 0;
+	if(record->system==GNSS_SYSTEM_GALILEO)return encoded<=511L&&(encoded&7L)==0L;
+	return encoded==0L;
+}
+
+static int downloaded_nav_supports_signal(const char *path,gnss_signal_t signal,
+	const gpstime_t *required_time,int *legacy_glonass_only)
+{
+	gnss_nav_record_t *records=NULL;
+	size_t count=0U,index;
+	unsigned int found=0U;
+	int saw_glonass=0;
+	if(legacy_glonass_only!=NULL)*legacy_glonass_only=0;
+	if(gnss_load_rinex_nav(path,&records,&count)!=0)return 0;
+	for(index=0U;index<count;index++) {
+		const gnss_nav_record_t *record=&records[index];
+		gpstime_t epoch;
+		double age=0.0;
+		if(!downloaded_record_healthy(record))continue;
+		if(required_time!=NULL) {
+			if(gnss_calendar_to_gps(record->system,&record->toc,&epoch)!=0)continue;
+			age=gnss_time_difference(required_time,&epoch);
+			if(age< -30.0||age>(record->system==GNSS_SYSTEM_GLONASS?1800.0:14400.0))
+				continue;
+		}
+		if(record->system==GNSS_SYSTEM_GPS&&strcmp(record->message,"LNAV")==0)
+			found|=1U<<GNSS_SYSTEM_GPS;
+		else if(record->system==GNSS_SYSTEM_GALILEO&&strcmp(record->message,"INAV")==0)
+			found|=1U<<GNSS_SYSTEM_GALILEO;
+		else if(record->system==GNSS_SYSTEM_BEIDOU&&
+			(strcmp(record->message,"D1")==0||strcmp(record->message,"D2")==0))
+			found|=1U<<GNSS_SYSTEM_BEIDOU;
+		else if(record->system==GNSS_SYSTEM_GLONASS&&strcmp(record->message,"FDMA")==0) {
+			glonass_gnav_immediate_t immediate;
+			saw_glonass=1;
+			if(gnss_glonass_gnav_from_rinex(record,&immediate)==0)
+				found|=1U<<GNSS_SYSTEM_GLONASS;
+		}
+	}
+	free(records);
+	if(legacy_glonass_only!=NULL&&saw_glonass&&
+		(found&(1U<<GNSS_SYSTEM_GLONASS))==0U)*legacy_glonass_only=1;
+	if(signal==GNSS_SIGNAL_MIXED_OPEN)
+		return (found&((1U<<GNSS_SYSTEM_COUNT)-1U))==
+			((1U<<GNSS_SYSTEM_COUNT)-1U);
+	if(signal==GNSS_SIGNAL_GPS_L1CA)return (found&(1U<<GNSS_SYSTEM_GPS))!=0U;
+	if(signal==GNSS_SIGNAL_GALILEO_E1)return (found&(1U<<GNSS_SYSTEM_GALILEO))!=0U;
+	if(signal==GNSS_SIGNAL_BEIDOU_B1I)return (found&(1U<<GNSS_SYSTEM_BEIDOU))!=0U;
+	return (found&(1U<<GNSS_SYSTEM_GLONASS))!=0U;
+}
+
 static int download_broadcast_ephemeris(const datetime_t *date,
-	gnss_signal_t signal, char *navfile, size_t navfile_size)
+	gnss_signal_t signal,const gpstime_t *required_time,char *navfile,size_t navfile_size)
 {
 	int doy;
 	int yy;
@@ -222,7 +340,7 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 	char gz_path[MAX_CHAR];
 	char tmp_gz_path[MAX_CHAR + 8];
 	char tmp_out_path[MAX_CHAR + 8];
-	char urls[3][256];
+	char urls[4][256];
 	char cmd[768];
 	size_t source,source_count;
 	int downloaded = 0;
@@ -242,8 +360,13 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 		return -1;
 
 	if (file_exists(out_path)) {
-		printf("Using existing broadcast ephemeris: %s\n", out_path);
-		return copy_option(navfile, navfile_size, out_path, "downloaded ephemeris path");
+		int legacy_glonass_only=0;
+		if(downloaded_nav_supports_signal(out_path,signal,required_time,&legacy_glonass_only)) {
+			printf("Using validated broadcast ephemeris: %s\n", out_path);
+			return copy_option(navfile, navfile_size, out_path, "downloaded ephemeris path");
+		}
+		fprintf(stderr,"WARNING: Cached ephemeris %s is not usable for the selected profile%s; refreshing it.\n",
+			out_path,legacy_glonass_only?" (legacy GLONASS record lacks complete GNAV fields)":"");
 	}
 	if (snprintf(tmp_gz_path, sizeof(tmp_gz_path), "%s.tmp", gz_path) >= (int)sizeof(tmp_gz_path))
 		return -1;
@@ -256,19 +379,28 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 			date->y, doy, doy, yy) >= (int)sizeof(urls[0]) ||
 			snprintf(urls[1], sizeof(urls[1]),
 			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/brdc%03d0.%02dn.gz",
-			date->y, doy, doy, yy) >= (int)sizeof(urls[1])) return -1;
-		source_count=2U;
+			date->y, doy, doy, yy) >= (int)sizeof(urls[1]) ||
+			snprintf(urls[2],sizeof(urls[2]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_R_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy)>=(int)sizeof(urls[2]) ||
+			snprintf(urls[3],sizeof(urls[3]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy)>=(int)sizeof(urls[3])) return -1;
+		source_count=4U;
 	} else {
 		if (snprintf(urls[0], sizeof(urls[0]),
 			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00IGS_R_%04d%03d0000_01D_MN.rnx.gz",
 			date->y,doy,date->y,doy) >= (int)sizeof(urls[0]) ||
 			snprintf(urls[1], sizeof(urls[1]),
-			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_R_%04d%03d0000_01D_MN.rnx.gz",
 			date->y,doy,date->y,doy) >= (int)sizeof(urls[1]) ||
 			snprintf(urls[2], sizeof(urls[2]),
+			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDC00WRD_S_%04d%03d0000_01D_MN.rnx.gz",
+			date->y,doy,date->y,doy) >= (int)sizeof(urls[2]) ||
+			snprintf(urls[3], sizeof(urls[3]),
 			"https://igs.bkg.bund.de/root_ftp/IGS/BRDC/%04d/%03d/BRDM00DLR_S_%04d%03d0000_01D_MN.rnx.gz",
-			date->y,doy,date->y,doy) >= (int)sizeof(urls[2])) return -1;
-		source_count=3U;
+			date->y,doy,date->y,doy) >= (int)sizeof(urls[3])) return -1;
+		source_count=4U;
 	}
 
 	remove(tmp_gz_path);
@@ -285,6 +417,7 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 		return -1;
 
 	for (source = 0; source < source_count; source++) {
+		int legacy_glonass_only=0;
 		printf("Downloading broadcast ephemeris from source %zu/%zu: %s\n",
 			source + 1,source_count,urls[source]);
 		remove(tmp_gz_path);
@@ -293,8 +426,16 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 			tmp_gz_path, urls[source]) >= (int)sizeof(cmd))
 			goto fail;
 		if (run_command(cmd, "download broadcast ephemeris") == 0 && file_exists(tmp_gz_path)) {
-			downloaded = 1;
-			break;
+			remove(tmp_out_path);
+			if (snprintf(cmd, sizeof(cmd), "gzip -cd \"%s\" > \"%s\"", tmp_gz_path, tmp_out_path) >= (int)sizeof(cmd))
+				goto fail;
+			if(run_command(cmd,"decompress broadcast ephemeris")==0&&file_exists(tmp_out_path)&&
+				downloaded_nav_supports_signal(tmp_out_path,signal,required_time,&legacy_glonass_only)) {
+				downloaded = 1;break;
+			}
+			fprintf(stderr,"WARNING: Ephemeris source %zu produced no usable records%s; trying the next source.\n",
+				source+1U,legacy_glonass_only?" (legacy GLONASS data lacks complete GNAV fields)":"");
+			continue;
 		}
 		fprintf(stderr, "WARNING: Ephemeris source %zu failed; trying the next source.\n",
 			source + 1);
@@ -306,11 +447,6 @@ static int download_broadcast_ephemeris(const datetime_t *date,
 		fprintf(stderr, "ERROR: Download did not create %s.\n", tmp_gz_path);
 		goto fail;
 	}
-
-	if (snprintf(cmd, sizeof(cmd), "gzip -cd \"%s\" > \"%s\"", tmp_gz_path, tmp_out_path) >= (int)sizeof(cmd))
-		goto fail;
-	if (run_command(cmd, "decompress broadcast ephemeris") != 0)
-		goto fail;
 
 	if (!file_exists(tmp_out_path)) {
 		fprintf(stderr, "ERROR: Decompression did not create %s.\n", tmp_out_path);
@@ -348,6 +484,7 @@ void init_sim(sim_t *s)
 	s->tx.start_timestamp = 0U;
 	s->tx.end_timestamp = 0U;
 	s->tx.host_elapsed_seconds = 0.0;
+	s->tx.realtime_target_unix_seconds = 0.0;
 	s->tx.hardware_timeline_valid = 0;
 	s->tx.hardware_drain_complete = 0;
 	pthread_mutex_init(&(s->tx.lock), NULL);
@@ -466,11 +603,14 @@ static void sleep_one_millisecond(void)
 static int wait_for_tx_drain(sim_t *s, bladerf_timestamp target)
 {
 	double now, deadline;
+	bladerf_timestamp initial;
 	if (s == NULL || s->tx.dev == NULL || s->opt.tx_sample_rate == 0U ||
 		monotonic_seconds(&now) != 0)
 		return -1;
+	if(bladerf_get_timestamp(s->tx.dev,BLADERF_TX,&initial)!=0)return -1;
 	deadline = now + 2.0 +
-		(double)(NUM_BUFFERS * SAMPLES_PER_BUFFER) / (double)s->opt.tx_sample_rate;
+		(double)(NUM_BUFFERS * SAMPLES_PER_BUFFER) / (double)s->opt.tx_sample_rate+
+		(target>initial?(double)(target-initial)/(double)s->opt.tx_sample_rate:0.0);
 	for (;;) {
 		bladerf_timestamp current;
 		int status = bladerf_get_timestamp(s->tx.dev, BLADERF_TX, &current);
@@ -556,6 +696,7 @@ void *tx_task(void *arg)
 		memset(&metadata, 0, sizeof(metadata));
 		if (!burst_started) {
 			bladerf_timestamp current;
+			double start_delay=0.1;
 			status = bladerf_get_timestamp(s->tx.dev, BLADERF_TX, &current);
 			if (status != 0) {
 				fprintf(stderr, "Failed to read initial TX hardware timestamp: %s\n",
@@ -563,7 +704,25 @@ void *tx_task(void *arg)
 				s->tx.error = status;
 				goto stop_producer;
 			}
-			s->tx.start_timestamp = current + s->opt.tx_sample_rate / 10U;
+			if(s->tx.realtime_target_unix_seconds>0.0) {
+				double now;
+				if(wallclock_seconds(&now)!=0) {
+					fprintf(stderr,"Failed to read the UTC wall clock for real-time TX.\n");
+					s->tx.error=BLADERF_ERR_UNEXPECTED;goto stop_producer;
+				}
+				start_delay=s->tx.realtime_target_unix_seconds-now;
+				if(!isfinite(start_delay)||start_delay<0.05) {
+					fprintf(stderr,"Real-time TX deadline has insufficient lead (%.6f seconds remain).\n",
+						start_delay);
+					s->tx.error=BLADERF_ERR_TIMEOUT;goto stop_producer;
+				}
+			}
+			if(start_delay>(double)(UINT64_MAX-current)/(double)s->opt.tx_sample_rate) {
+				fprintf(stderr,"TX hardware timestamp range overflow.\n");
+				s->tx.error=BLADERF_ERR_RANGE;goto stop_producer;
+			}
+			s->tx.start_timestamp=current+(bladerf_timestamp)llround(
+				start_delay*(double)s->opt.tx_sample_rate);
 			metadata.timestamp = s->tx.start_timestamp;
 			metadata.flags = BLADERF_META_FLAG_TX_BURST_START;
 			s->tx.hardware_timeline_valid = 1;
@@ -572,7 +731,8 @@ void *tx_task(void *arg)
 		if (final_buffer)
 			metadata.flags |= BLADERF_META_FLAG_TX_BURST_END;
 		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER,
-			&metadata, TIMEOUT_MS);
+			&metadata,s->tx.realtime_target_unix_seconds>0.0?
+			REALTIME_TIMEOUT_MS:TIMEOUT_MS);
 		if (status != 0) {
 			fprintf(stderr, "TX stream failed: %s\n", bladerf_strerror(status));
 			s->tx.error = status;
@@ -647,6 +807,7 @@ void usage(void)
 		"  -g <nmea_gga>    NMEA GGA stream (dynamic mode)\n"
 		"  -l <location>    Lat,Lon,Hgt (static mode) e.g. 35.274,137.014,100\n"
 		"  -t <date,time>   Scenario start time YYYY/MM/DD,hh:mm:ss\n"
+		"  -R               Use current UTC/GPS time and align sample zero to the wall clock\n"
 		"  -d <duration>    Duration [sec] (max: %.0f)\n"
 		"  -x <XB number>   Enable XB board, e.g. '-x 200' for XB200\n"
 		"  -S <signal>      Signal profile (gps-l1ca, galileo-e1, beidou-b1i, glonass-l1of, mixed-open)\n"
@@ -727,8 +888,9 @@ int main(int argc, char *argv[])
 	s.opt.llh[2] = 100.0;
 	s.opt.interactive = FALSE;
 	s.opt.controller_index = -1;
+	s.opt.realtime_start = FALSE;
 
-	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:ij:S:LD:f:r:b:G:a:A:M:"))!=-1)
+	while ((result=getopt(argc,argv,"e:u:p:g:l:t:d:x:ij:S:LRD:f:r:b:G:a:A:M:"))!=-1)
 	{
 		switch (result)
 		{
@@ -782,8 +944,17 @@ int main(int argc, char *argv[])
 			}
 			t0.sec = floor(t0.sec);
 			date2gps(&t0, &s.opt.g0);
-			navdate = t0;
+			{
+				gnss_calendar_time_t utc;
+				if(gnss_gps_to_utc_calendar(&s.opt.g0,&utc)!=0) {
+					fprintf(stderr,"ERROR: Cannot convert scenario GPS time to UTC.\n");exit(1);
+				}
+				navdate=(datetime_t){utc.year,utc.month,utc.day,utc.hour,utc.minute,utc.second};
+			}
 			navdate_set = 1;
+			break;
+		case 'R':
+			s.opt.realtime_start=TRUE;
 			break;
 		case 'd':
 			if (parse_duration(optarg, &s.opt.iduration) != 0) {
@@ -879,6 +1050,10 @@ int main(int argc, char *argv[])
 		gnss_print_signal_profiles();
 		return 0;
 	}
+	if(navdate_set&&s.opt.realtime_start) {
+		fprintf(stderr,"ERROR: -R cannot be combined with explicit scenario time -t.\n");
+		return 1;
+	}
 	if (tx_gain_set && (tx_vga1_set || tx_vga2_set)) {
 		fprintf(stderr, "ERROR: -G cannot be combined with legacy -a/-A gain stages.\n");
 		return 1;
@@ -922,14 +1097,29 @@ int main(int argc, char *argv[])
 	devstr = s.opt.device[0] != 0 ? s.opt.device : NULL;
 
 	if (s.opt.navfile[0]==0) {
+		gpstime_t required_time;
+		const gpstime_t *required_time_pointer=NULL;
+		if(!navdate_set)s.opt.realtime_start=TRUE;
 		if (!navdate_set && utc_today(&navdate) != 0) {
 			printf("ERROR: Navigation file is not specified and current UTC date is unavailable.\n");
 			exit(1);
 		}
-		if (download_broadcast_ephemeris(&navdate,s.opt.signal,
+		if(s.opt.realtime_start) {
+			if(utc_now_gps(&required_time,NULL)!=0) {
+				fprintf(stderr,"ERROR: Current UTC/GPS time is unavailable for ephemeris validation.\n");exit(1);
+			}
+			required_time_pointer=&required_time;
+		} else if(s.opt.g0.week>=0) required_time_pointer=&s.opt.g0;
+		if (download_broadcast_ephemeris(&navdate,s.opt.signal,required_time_pointer,
 			s.opt.navfile,sizeof(s.opt.navfile)) != 0) {
-			printf("ERROR: Failed to auto-download broadcast ephemeris. Use -e <nav_file> to provide one manually.\n");
-			exit(1);
+			datetime_t fallback=navdate;
+			if(!s.opt.realtime_start||previous_utc_day(&fallback)!=0||
+				download_broadcast_ephemeris(&fallback,s.opt.signal,required_time_pointer,
+					s.opt.navfile,sizeof(s.opt.navfile))!=0) {
+				printf("ERROR: Failed to auto-download usable broadcast ephemeris. Use -e <nav_file> to provide one manually.\n");
+				exit(1);
+			}
+			printf("Using previous-day broadcast ephemeris fallback for the live start.\n");
 		}
 	}
 
@@ -986,6 +1176,16 @@ int main(int argc, char *argv[])
 	s.status = blade_hw_configure_tx(s.tx.dev, &hw_config, &hw_result);
 	if (s.status != 0)
 		goto out;
+	if(s.opt.realtime_start) {
+		double now;
+		if(utc_now_gps(&s.opt.g0,&now)!=0) {
+			fprintf(stderr,"Failed to read current UTC/GPS time.\n");goto out;
+		}
+		s.opt.g0.sec+=REALTIME_START_LEAD_SECONDS;normalizeGpsTime(&s.opt.g0);
+		s.tx.realtime_target_unix_seconds=now+REALTIME_START_LEAD_SECONDS;
+		printf("Real-time epoch: GPS week %d SOW %.3f; RF sample zero scheduled %.1f seconds ahead.\n",
+			s.opt.g0.week,s.opt.g0.sec,REALTIME_START_LEAD_SECONDS);
+	}
 
 	// Start the selected constellation producer task.
 	s.status = start_gnss_task(&s);
@@ -1022,7 +1222,7 @@ int main(int argc, char *argv[])
 			NUM_BUFFERS,
 			SAMPLES_PER_BUFFER,
 			NUM_TRANSFERS,
-			TIMEOUT_MS);
+			s.opt.realtime_start?REALTIME_TIMEOUT_MS:TIMEOUT_MS);
 
 	if (s.status != 0) {
 		fprintf(stderr, "Failed to configure TX sync interface: %s\n", bladerf_strerror(s.status));

@@ -122,7 +122,7 @@ It does not configure RX, ADC, bias tee, clock input, or triggers. At startup it
 8. sets overall gain or both requested legacy bladeRF 1 TXVGA stages;
 9. configures 32 timestamped synchronous buffers of 32768 samples with 16 USB transfers;
 10. enables TX only after the synchronous stream is configured;
-11. schedules one continuous burst 100 ms ahead of the current FPGA TX clock;
+11. schedules one continuous burst 100 ms ahead normally, or maps the five-second `-R` wall-clock target to the corresponding future FPGA TX timestamp;
 12. marks the final buffer as burst end and waits for the FPGA clock to pass
     every submitted sample before disabling TX.
 
@@ -173,16 +173,17 @@ the real-time CPU budget of slower hosts.
 Use `-e FILE` for an existing navigation file. Supported production inputs are:
 
 - GPS RINEX 2 broadcast navigation;
-- mixed RINEX 3 navigation containing the selected record family; legacy
-  GLONASS records support state-vector propagation but do not contain the four
-  extended FDMA fields required to construct an authentic complete GNAV frame;
+- mixed RINEX 3 navigation containing the selected record family; RINEX 3.05
+  optional GLONASS Orbit-4 is parsed, but complete GNAV still requires its
+  fields to be populated rather than blank/sentinel;
 - mixed RINEX 4 `EPH` records for GPS LNAV, Galileo INAV, BeiDou D1/D2, or
   GLONASS FDMA;
 - plain files and, on POSIX, directly streamed `.gz` or legacy `.Z` files.
 
-When `-e` is omitted, the `-t` calendar date is used; otherwise today’s UTC date
-is used. GPS tries NOAA/NGS and BKG daily GPS files. Other and mixed profiles
-try BKG daily mixed products. Downloads are cached in the working directory.
+When `-e` is omitted, GPS `-t` is converted to a UTC download date; otherwise
+today’s UTC date is used and live mode is enabled. Downloads and caches are
+parsed and checked for the selected family, health, age, and complete required
+fields before use. `-R` requests the same synchronized live start with `-e`.
 
 Examples:
 
@@ -243,6 +244,7 @@ a local-frame offset; it does not erase prerecorded motion.
 | `-L` | List profiles and exit without opening hardware. |
 | `-e FILE` | Use a navigation file instead of automatic download. |
 | `-t YYYY/MM/DD,hh:mm:ss` | Set scenario and download date/time. |
+| `-R` | Use synchronized host UTC and align RF sample zero to a five-second future wall-clock epoch; cannot be combined with `-t`. |
 | `-d SECONDS` | Set duration, rounded to 100 ms; maximum 86400 seconds. |
 | `-l LAT,LON,HGT` | Use a static receiver position in degrees/metres. |
 | `-u FILE` | Use timed ECEF CSV motion. |

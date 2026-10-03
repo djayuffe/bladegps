@@ -96,17 +96,18 @@ unchanged carrier or spreading code.
 `main()` in `bladegps.c` performs the real-time program lifecycle:
 
 1. Parse CLI options.
-2. If `-e` is absent, determine the ephemeris date from `-t` or current UTC date.
-3. Download/cache the broadcast ephemeris if needed.
+2. If `-e` is absent, determine the UTC ephemeris date from GPS `-t` or the host UTC clock.
+3. Download/cache, decompress, parse, and validate signal family, health, age,
+   and required extended fields; a live request can retry the preceding day.
 4. Validate required motion/static-location settings.
 5. Initialize shared simulator state with `init_sim()`.
 6. Allocate the bladeRF transfer buffer and internal FIFO.
 7. Open and configure the bladeRF device.
 8. Optionally configure XB200.
-9. Start the shared GNSS producer thread.
+9. For live mode, convert host UTC to GPS, choose a five-second target, then start the shared GNSS producer thread.
 10. Wait for producer initialization.
 11. Configure and enable the bladeRF synchronous TX interface.
-12. Start the TX consumer thread.
+12. Start the TX consumer thread; it maps the live wall-clock target to a future FPGA timestamp and rejects a missed deadline.
 13. Join TX, disable TX, join the GNSS producer, free resources, and close the device.
 
 The program returns non-zero if setup fails, GNSS generation cannot initialize,
@@ -122,18 +123,19 @@ When `-e` is omitted:
 2. Otherwise, `utc_today()` uses the current UTC calendar date.
 3. `day_of_year()` maps the date to RINEX day-of-year.
 4. GPS uses `brdcDDD0.YYn`; non-GPS profiles use the long-name mixed RINEX cache `BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx`.
-5. Existing local files are reused.
-6. GPS files come from NOAA/NGS CORS with BKG as fallback. Non-GPS files try three daily BKG mixed products:
+5. Existing local files are reused only after the same parse/usability/age validation as a fresh download.
+6. GPS files come from NOAA/NGS and BKG legacy/mixed products. Other profiles try four daily BKG mixed products:
 
 ```text
 https://geodesy.noaa.gov/corsdata/rinex/YYYY/DDD/brdcDDD0.YYn.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/brdcDDD0.YYn.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx.gz
+https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00WRD_R_YYYYDDD0000_01D_MN.rnx.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDC00WRD_S_YYYYDDD0000_01D_MN.rnx.gz
 https://igs.bkg.bund.de/root_ftp/IGS/BRDC/YYYY/DDD/BRDM00DLR_S_YYYYDDD0000_01D_MN.rnx.gz
 ```
 
-The downloader requires `curl` and `gzip`. It writes compressed and decompressed data to `.tmp` files first, verifies that those files exist, then renames them into place. On failure, temporary files are removed and the user is told to provide `-e <nav_file>` manually.
+The downloader requires `curl` and `gzip`. Temporary compressed and decompressed files are promoted only after typed parsing confirms usable, healthy, in-age records. Live mode may try the previous UTC day. Partial, stale, wrong-family, and incomplete-GLONASS products are cleaned up and never cached as success.
 
 Auto-downloaded files are ignored by git through `.gitignore` patterns, while existing tracked sample files remain tracked.
 
@@ -181,8 +183,9 @@ Main responsibilities:
 
 - Wait until FIFO data is available or generation is finished.
 - Copy enough samples into `tx.buffer`.
-- Read the FPGA TX timestamp and schedule the first transfer 100 ms ahead so
-  producer, USB, and device queues are primed before RF starts.
+- Read the FPGA TX timestamp and normally schedule the first transfer 100 ms
+  ahead. In live mode, convert the remaining wall-clock lead to hardware
+  samples so simulated GPS epoch and RF sample zero share one target instant.
 - Call `bladerf_sync_tx()` with `BLADERF_FORMAT_SC16_Q11_META` and one
   continuous burst spanning every transfer.
 - Measure SC16 Q11 peaks and rail contact before each transfer.

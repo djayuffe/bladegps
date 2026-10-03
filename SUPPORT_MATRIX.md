@@ -85,6 +85,9 @@ RF frame must not imply that optional real-world service data was available.
 | GPS/BDT 14-second epoch offset | Implemented |
 | GLONASS UTC(SU)+3 scheduling basis | Implemented |
 | Historical GPS-UTC leap transitions and insertion-date validation | Implemented |
+| Fractional GPS-to-UTC inverse, including `23:59:60.x` | Implemented |
+| Host-UTC to future FPGA-timestamp sample-zero alignment | Implemented (`-R`; automatic for live download) |
+| Host clock synchronization/UTC traceability | External prerequisite; checked indirectly by ephemeris age |
 | Arbitrary future leap-second prediction from navigation headers | Not implemented |
 | Per-satellite iterative transmit time | Implemented |
 | Navigation and overlay initial phase from transmit time | Implemented |
@@ -97,7 +100,7 @@ RF frame must not imply that optional real-world service data was available.
 | Input | GPS | Galileo | BeiDou | GLONASS | Notes |
 | --- | --- | --- | --- | --- | --- |
 | RINEX 2 GPS NAV | Yes | No | No | No | Used by the GPS automatic downloader and accepted by the shared typed loader. |
-| RINEX 3 mixed NAV | LNAV | INAV used; FNAV parsed only | D1/D2 inferred from record family/PRN | State-vector propagation only | Legacy GLONASS records omit the status, group-delay, accuracy, and extended-health fields required for complete GNAV generation. |
+| RINEX 3 mixed NAV | LNAV | INAV used; FNAV parsed only | D1/D2 inferred from record family/PRN | State vector; GNAV only when 3.05 Orbit-4 fields are populated | QZSS/NavIC/SBAS records are skipped safely. Blank/sentinel GLONASS Orbit-4 fields are rejected for GNAV. |
 | RINEX 4 mixed NAV | `EPH G.. LNAV` | `EPH E.. INAV`; FNAV parsed only | `EPH C.. D1/D2` | `EPH R.. FDMA` | Unsupported record families are skipped without desynchronizing the stream. |
 | Plain file | Yes | Yes | Yes | Yes | Direct file input. |
 | `.gz` / legacy `.Z` navigation | Yes on POSIX | Yes on POSIX | Yes on POSIX | Yes on POSIX | Shared typed loader streams through a shell-free `gzip` child; automatic downloads are also cached decompressed. |

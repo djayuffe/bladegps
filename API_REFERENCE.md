@@ -57,6 +57,7 @@ helpers are implementation details and are described by responsibility in
 | --- | --- | --- |
 | `gnss_calendar_to_gps(system, calendar, gps)` | Validates a native RINEX calendar epoch and converts it to continuous GPS week/SOW. GPS/GST are aligned, BDT is 14 seconds behind GPS, and GLONASS epochs use the historical GPS-UTC table. | 0/-1. |
 | `gnss_gps_to_system_time(system, gps, system_time)` | Converts continuous GPS time to the constellation scheduling scale while retaining a continuous Sunday-based week. | 0/-1. |
+| `gnss_gps_to_utc_calendar(gps, utc)` | Converts normalized GPS week/SOW to fractional UTC and represents an inserted leap interval as `23:59:60.x` instead of rounding it away. | 0/-1. |
 | `gnss_gps_utc_offset(utc, offset)` | Returns historical GPS−UTC seconds. An inserted `23:59:60` uses the offset valid during that leap second; second 60 is rejected outside a listed insertion date at 23:59. | 0/-1. |
 | `gnss_time_difference(newer, older)` | Full-week difference `(week delta × 604800) + SOW delta`. | Seconds; `NAN` for null pointers (non-finite members propagate naturally). |
 
@@ -70,7 +71,7 @@ helpers are implementation details and are described by responsibility in
 | --- | --- | --- |
 | `gnss_read_rinex_nav(path, records, capacity, count)` | Parses supported RINEX. Use `records=NULL, capacity=0` for counting; otherwise capacity must hold every accepted record. On success `*count` is exact. POSIX accepts `.gz`/`.Z`. | 0 when at least one record was read; -1 otherwise. |
 | `gnss_load_rinex_nav(path, records, count)` | Two-pass count/allocation/load. Sets outputs to empty before work. Caller releases `*records` with `free()`. | 0/-1. |
-| `gnss_read_beidou_ionosphere(path, model)` | Reads the last complete BDS alpha/beta model from RINEX 3 header or RINEX 4 ION data. | 0 found, 1 absent, -1 malformed/error. |
+| `gnss_read_beidou_ionosphere(path, model)` | Reads a complete BDS alpha/beta model from RINEX 3 header or RINEX 4 ION data. RINEX 3 selects the first complete pair so provider-tagged duplicates cannot be cross-paired. | 0 found, 1 absent, -1 malformed/error. |
 
 ## Orbit propagation — `gnss_orbit.h`
 
@@ -260,7 +261,7 @@ FIFO function counts therefore describe I/Q pairs rather than scalar values.
 | `fifo_read(buffer, samples, sim)` | Reads `min(samples, queued)` complex samples with ring wraparound, advances `tail`, and returns the count read. It does not lock; production callers hold `sim->gps.lock`. `buffer` contains `2 × return_value` components. |
 | `is_finished_generation(sim)` | Returns the current completion flag without locking; production callers use `sim->gps.lock`. |
 | `is_fifo_write_ready(sim)` | Returns true when one complete `iq_block_samples` producer block fits. It does not lock and also refreshes the cached `sample_length`; production callers hold `sim->gps.lock`. |
-| `tx_task(argument)` | FIFO consumer and timestamped synchronous bladeRF TX thread. Schedules a continuous burst 100 ms ahead, marks its end, waits for the FPGA timestamp to drain, and stores terminal failure in `sim->tx.error`. Returns `NULL`. |
+| `tx_task(argument)` | FIFO consumer and timestamped synchronous bladeRF TX thread. Normally schedules 100 ms ahead; live mode maps its wall-clock target to the FPGA sample clock and rejects missed deadlines. It marks burst end, waits through any future lead plus every submitted sample, and stores terminal failure in `sim->tx.error`. Returns `NULL`. |
 | `start_tx_task(sim)` | Creates `tx_task`; returns pthread status. |
 | `start_gnss_task(sim)` | Creates `gnss_task`; returns pthread status. |
 | `gnss_task(argument)` | Shared producer: load data/motion, select/observe/schedule/allocate/render, write FIFO, and propagate completion/error. Returns `NULL`; readiness/error/completion are published through `sim_t`. |

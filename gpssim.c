@@ -214,10 +214,17 @@ void date2gps(const datetime_t *t, gpstime_t *g)
 void gps2date(const gpstime_t *g, datetime_t *t)
 {
 	long c,d,e,f;
-	double gsec = round(g->sec);
+	gpstime_t normalized = *g;
+	double gsec;
+
+	/* Keep fractional seconds intact.  Rounding here used to move epochs in
+	 * the second half of a second onto the next navigation symbol (and could
+	 * even move 23:59:59.5 into the next day). */
+	normalizeGpsTime(&normalized);
+	gsec = normalized.sec;
 
 	// Convert Julian day number to calendar date
-	c = (long)(7.0*(double)g->week + floor(gsec/86400.0)+2444245.0) + 1537;
+	c = (long)(7.0*(double)normalized.week + floor(gsec/86400.0)+2444245.0) + 1537;
 	d = (long)(((double)c-122.1)/365.25);
 	e = 365*d + d/4;
 	f = (long)((double)(c-e)/30.6001 );

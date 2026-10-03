@@ -18,6 +18,11 @@ int gnss_calendar_to_gps(gnss_system_t system,
 int gnss_gps_to_system_time(gnss_system_t system,
 	const gpstime_t *gps, gpstime_t *system_time);
 
+/* Convert continuous GPS time to a UTC calendar value without discarding
+ * fractional seconds.  The inserted leap second is returned as 23:59:60.x. */
+int gnss_gps_to_utc_calendar(const gpstime_t *gps,
+	gnss_calendar_time_t *utc);
+
 /* GPS-UTC at a UTC calendar instant.  Leap second 23:59:60 is represented
  * using the offset that was in force during that inserted second. */
 int gnss_gps_utc_offset(const gnss_calendar_time_t *utc, int *offset_seconds);

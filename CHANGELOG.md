@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Added wall-clock live mode (`-R`, automatic for download-without-`-t`): host
+  UTC is converted to fractional GPS time and sample zero is mapped to a
+  five-second future FPGA timestamp with deadline-aware stream/drain timeouts.
+- Preserved fractional seconds in GPS calendar conversion, added inverse UTC
+  leap-second round trips, and derived every 10 Hz epoch from an integer tick.
+- Made downloads content-aware: cached/fresh files are parsed and validated for
+  signal family, health, age, and complete GLONASS fields; GPS can fall back to
+  current BKG mixed products and live requests can retry the previous day.
+- Fixed live RINEX 3.05 parsing by safely skipping QZSS/NavIC/SBAS records and
+  consuming optional GLONASS Orbit-4 fields without misaligning the next epoch.
+- Accepted standard RINEX header precision when reconstructing BeiDou
+  ionosphere coefficients and preserved the first matching A/B pair.
+- Prefer already-effective ephemerides over the tolerated future-boundary
+  record and eliminate cumulative 0.1-second epoch drift.
 - Replaced completion-by-host-queue with one hardware-timestamped continuous TX
   burst: 100 ms FPGA-clock priming, explicit burst end, submitted-sample
   accounting, hardware drain wait, and RF/host duration telemetry now apply to
