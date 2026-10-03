@@ -43,7 +43,8 @@ This is research and lab software. Only transmit GPS-like RF signals inside a pr
 - Capability-driven bladeRF 1.0/2.0 adaptation for center frequency, exact sample rate, analog bandwidth, and portable overall TX gain.
 - Hardware range checks and configuration read-back before RF transmission.
 - Analog-filter validation against the complete occupied signal span, including an offset carrier.
-- Deterministic SC16 Q11 headroom normalization, peak/rail telemetry, and zero-padded final-buffer flushing.
+- Deterministic SC16 Q11 headroom normalization, peak/rail telemetry, and
+  hardware-timestamped continuous-burst transmission with verified final drain.
 - Signal registry and RF validation for GPS L1 C/A, Galileo E1, BeiDou B1I, and GLONASS L1OF.
 - Real-time SC16 I/Q streaming to bladeRF.
 - Optional XB200 setup for GPS-band transmit filtering/path selection.

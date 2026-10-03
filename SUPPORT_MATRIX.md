@@ -118,6 +118,9 @@ Receiver velocity is derived from successive ECEF samples and contributes to
 range rate and Doppler. A controller disconnect is an error; the simulator does
 not silently continue with a frozen motion command.
 
+Every motion mode feeds the same 10 Hz producer and hardware-timestamped TX
+burst; motion input changes geometry/Doppler but not RF pacing.
+
 ## bladeRF and sample-path support
 
 | Capability | Status | Boundary |

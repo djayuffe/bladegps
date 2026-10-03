@@ -398,6 +398,8 @@ static void test_keyboard_motion_state(void)
 
 static void test_constellation_rf_sequences(void)
 {
+	int gps_binary[CA_SEQ_LEN];
+	int8_t gps[CA_SEQ_LEN];
 	int8_t galileo_b[GALILEO_E1_CODE_LENGTH],galileo_c[GALILEO_E1_CODE_LENGTH];
 	int8_t galileo_secondary[GALILEO_E1C_SECONDARY_LENGTH];
 	int8_t beidou[BEIDOU_B1I_CODE_LENGTH],nh[BEIDOU_B1I_NH_LENGTH];
@@ -407,7 +409,7 @@ static void test_constellation_rf_sequences(void)
 	uint8_t glonass_string[85]={0},previous=0U;
 	uint8_t nav_bits[300];
 	int16_t iq[256];
-	gnss_rf_channel_t channel;
+	gnss_rf_channel_t channel,galileo_channel,beidou_channel,glonass_channel;
 	size_t index;
 
 	assert(gnss_galileo_e1_primary_code(1U,GALILEO_E1_COMPONENT_B,galileo_b)==0);
@@ -425,6 +427,7 @@ static void test_constellation_rf_sequences(void)
 	channel.data_rate_hz=250.0; channel.overlay_symbols=galileo_secondary;
 	channel.overlay_symbol_count=GALILEO_E1C_SECONDARY_LENGTH;
 	channel.overlay_rate_hz=250.0;
+	galileo_channel=channel;
 	assert(gnss_rf_render(&channel,1U,1575.42e6,
 		GNSS_GALILEO_E1_SAMPLE_RATE_HZ,iq,128U)==0);
 	{
@@ -460,6 +463,7 @@ static void test_constellation_rf_sequences(void)
 	channel.overlay_symbol_count=BEIDOU_B1I_NH_LENGTH; channel.overlay_rate_hz=1000.0;
 	channel.code_phase=channel.data_phase=channel.overlay_phase=channel.carrier_phase=0.0;
 	assert(gnss_rf_render(&channel,1U,1561.098e6,5.0e6,iq,128U)==0);
+	beidou_channel=channel;
 
 	for(index=0U;index<85U;index++) glonass_string[index]=(uint8_t)((index/3U)&1U);
 	assert(gnss_glonass_l1of_symbols(glonass_string,&previous,glonass_symbols)==0);
@@ -473,6 +477,26 @@ static void test_constellation_rf_sequences(void)
 	channel.overlay_rate_hz=channel.overlay_phase=0.0;
 	channel.code_phase=channel.data_phase=channel.carrier_phase=0.0;
 	assert(gnss_rf_render(&channel,1U,1602.0e6,2.0e6,iq,128U)==0);
+	glonass_channel=channel;
+	{
+		gnss_rf_channel_t mixed[4];
+		int nonzero=0;
+		codegen(gps_binary,1);
+		for(index=0U;index<CA_SEQ_LEN;index++)gps[index]=(int8_t)(gps_binary[index]*2-1);
+		memset(&mixed[0],0,sizeof(mixed[0]));
+		mixed[0].enabled=1;mixed[0].modulation=GNSS_RF_BPSK;
+		mixed[0].system=GNSS_SYSTEM_GPS;mixed[0].prn=1U;
+		mixed[0].carrier_hz=1575.42e6;mixed[0].amplitude=120.0;
+		mixed[0].data_code=gps;mixed[0].code_length=CA_SEQ_LEN;
+		mixed[0].code_rate_hz=1.023e6;mixed[0].data_symbols=nav_symbols;
+		mixed[0].data_symbol_count=300U;mixed[0].data_rate_hz=50.0;
+		mixed[1]=galileo_channel;mixed[1].amplitude=90.0;
+		mixed[2]=beidou_channel;mixed[2].amplitude=120.0;
+		mixed[3]=glonass_channel;mixed[3].amplitude=120.0;
+		assert(gnss_rf_render(mixed,4U,1582392500.0,50000000.0,iq,128U)==0);
+		for(index=0U;index<256U;index++)nonzero+=iq[index]!=0;
+		assert(nonzero>200);
+	}
 	glonass_string[2]=2U;
 	assert(gnss_glonass_l1of_symbols(glonass_string,&previous,glonass_symbols)==-1);
 }

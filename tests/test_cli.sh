@@ -19,6 +19,7 @@ expect_rejected()
 expect_rejected -e brdc1700.16n -l nan,0,0 -d 1
 expect_rejected -e brdc1700.16n -l 0,0,nan -d 1
 expect_rejected -e brdc1700.16n -l 0,0,0 -d nan
+expect_rejected -e brdc1700.16n -l 0,0,0 -d 0.01
 expect_rejected -e brdc1700.16n -l 0,0,0 -t 2020/01/01,00:00:nan -d 1
 expect_rejected -e brdc1700.16n -l 0,0,0 -r 2600001 -d 1
 expect_rejected -e brdc1700.16n -l 0,0,0 -G 0 -a -25 -A 0 -d 1

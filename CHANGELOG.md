@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replaced completion-by-host-queue with one hardware-timestamped continuous TX
+  burst: 100 ms FPGA-clock priming, explicit burst end, submitted-sample
+  accounting, hardware drain wait, and RF/host duration telemetry now apply to
+  every constellation and motion mode.
+- Reject positive durations that round below the minimum 100 ms producer block.
 - Corrected Galileo E1-B I/NAV transmission timing to the ICD 2.2 circular
   page-part sequence: the second-0 odd half now closes the word begun at second
   29, with subsequent even/odd pairs at 1/2, 3/4, and so on.

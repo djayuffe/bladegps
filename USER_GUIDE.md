@@ -120,8 +120,11 @@ It does not configure RX, ADC, bias tee, clock input, or triggers. At startup it
 6. sets and reads back the center frequency and sample rate exactly;
 7. sets the analog filter, reads it back, and validates the realized passband;
 8. sets overall gain or both requested legacy bladeRF 1 TXVGA stages;
-9. configures 32 synchronous buffers of 32768 samples with 16 USB transfers;
-10. enables TX only after the synchronous stream is configured.
+9. configures 32 timestamped synchronous buffers of 32768 samples with 16 USB transfers;
+10. enables TX only after the synchronous stream is configured;
+11. schedules one continuous burst 100 ms ahead of the current FPGA TX clock;
+12. marks the final buffer as burst end and waits for the FPGA clock to pass
+    every submitted sample before disabling TX.
 
 For SC16 Q11, USB 2.0 High-Speed has an absolute nominal payload ceiling of
 15 Msps before protocol overhead. Nuand's
@@ -133,8 +136,9 @@ mixed profiles therefore require USB SuperSpeed; a successful RF sample-rate
 setting alone is not a transport-throughput guarantee.
 
 The stream submits complete 32768-sample transfers. A final partial scenario
-transfer is zero-padded, so generated samples are not stranded in libbladeRF’s
-buffer. Shutdown reports the digital peak, Q11 rail contacts, and padding.
+transfer is zero-padded and explicitly marked as the end of the timestamped
+burst. Shutdown reports the digital peak, Q11 rail contacts, padding, scheduled
+RF duration, host elapsed time, and whether the FPGA timeline fully drained.
 
 ### Gain
 
@@ -304,8 +308,10 @@ selected constellation/message type, and check health fields.
 ### TX timeout or underrun symptoms
 
 Use USB SuperSpeed, avoid hubs, close competing streams, reduce host load, and
-select a narrower profile. The non-metadata API cannot report every hardware
-underrun in-band, so receiver/spectrum validation remains necessary.
+select a narrower profile. Timestamped continuous-burst scheduling prevents
+host queue completion from being mistaken for RF completion, but the installed
+libbladeRF API does not report TX underrun status. Independent receiver or
+spectrum validation therefore remains necessary.
 
 ### Digital rail warning
 

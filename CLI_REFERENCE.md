@@ -23,7 +23,7 @@ from `-e` or automatic download.
 | `-L` | none | — | off | Prints each profile's description, carrier, minimum waveform span, default sample rate, default analog filter, and implementation state, then exits successfully. Other run options are ignored because no scenario starts. |
 | `-e` | path | Existing plain RINEX; POSIX also accepts `.gz`/`.Z` | automatic download | Navigation path, maximum 99 characters. RINEX family must match the chosen service. |
 | `-t` | date,time | `YYYY/MM/DD,hh:mm:ss`, year > 1980, valid date, hour 0–23, minute 0–59, second `[0,60)` | first matching ephemeris epoch; current UTC date for download | Sets scenario time and automatic-download date. Fractional seconds are accepted syntactically and floored to an integer second. |
-| `-d` | seconds | finite decimal, `0 < d <= 86400` | 86400 seconds | Rounded to the nearest 100 ms step as `floor(d*10 + 0.5)`. |
+| `-d` | seconds | finite decimal, `0.05 <= d <= 86400` | 86400 seconds | Rounded to the nearest 100 ms step as `floor(d*10 + 0.5)`; values that would produce zero blocks are rejected. |
 | `-l` | lat,lon,height | latitude `[-90,90]` degrees, longitude `[-180,180]` degrees, finite numeric height in metres | `35.274016,137.013765,100` | Static receiver location. Selecting it overrides prior file-motion mode flags. |
 | `-u` | path | ECEF motion CSV | none | Selects dynamic `time,x,y,z` ECEF motion and disables static/NMEA/geodetic modes. Path limit is 99 characters. |
 | `-p` | path | Geodetic motion CSV | none | Selects dynamic `time,latitude,longitude,height` motion and disables static/NMEA/ECEF modes. |

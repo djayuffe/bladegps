@@ -92,6 +92,12 @@ typedef struct {
 	int16_t *buffer;
 	blade_sample_stats_t sample_stats;
 	uint64_t padded_samples;
+	uint64_t submitted_samples;
+	bladerf_timestamp start_timestamp;
+	bladerf_timestamp end_timestamp;
+	double host_elapsed_seconds;
+	int hardware_timeline_valid;
+	int hardware_drain_complete;
 } tx_t;
 
 typedef struct {

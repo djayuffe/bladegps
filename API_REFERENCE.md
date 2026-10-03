@@ -245,7 +245,7 @@ rail contacts, and peak absolute component.
 | Type | Important fields and units |
 | --- | --- |
 | `option_t` | Input paths, selected signal, center/sample/filter settings in hertz, gains in dB, elevation mask in degrees, receiver mode, duration in 0.1-second blocks, scenario GPS time, and live-input selection. |
-| `tx_t` | TX thread, lock, terminal error, bladeRF handle, interleaved SC16 buffer, accumulated sample statistics, and final-padding count. |
+| `tx_t` | TX thread, lock, terminal error, bladeRF handle, interleaved SC16 buffer, accumulated sample statistics, final-padding/submitted counts, FPGA start/end timestamps, host elapsed time, and timeline/drain status. |
 | `gps_t` | Producer thread, lock, initialization result, readiness flag, and initialization condition variable. |
 | `sim_t` | Complete immutable options plus TX/producer state, FIFO indices and capacities in complex samples, 100 ms block size, conditions, status, completion flag, and elapsed simulation seconds. |
 
@@ -260,7 +260,7 @@ FIFO function counts therefore describe I/Q pairs rather than scalar values.
 | `fifo_read(buffer, samples, sim)` | Reads `min(samples, queued)` complex samples with ring wraparound, advances `tail`, and returns the count read. It does not lock; production callers hold `sim->gps.lock`. `buffer` contains `2 × return_value` components. |
 | `is_finished_generation(sim)` | Returns the current completion flag without locking; production callers use `sim->gps.lock`. |
 | `is_fifo_write_ready(sim)` | Returns true when one complete `iq_block_samples` producer block fits. It does not lock and also refreshes the cached `sample_length`; production callers hold `sim->gps.lock`. |
-| `tx_task(argument)` | FIFO consumer and synchronous bladeRF TX thread. Returns `NULL`; terminal failure is stored in `sim->tx.error`. |
+| `tx_task(argument)` | FIFO consumer and timestamped synchronous bladeRF TX thread. Schedules a continuous burst 100 ms ahead, marks its end, waits for the FPGA timestamp to drain, and stores terminal failure in `sim->tx.error`. Returns `NULL`. |
 | `start_tx_task(sim)` | Creates `tx_task`; returns pthread status. |
 | `start_gnss_task(sim)` | Creates `gnss_task`; returns pthread status. |
 | `gnss_task(argument)` | Shared producer: load data/motion, select/observe/schedule/allocate/render, write FIFO, and propagate completion/error. Returns `NULL`; readiness/error/completion are published through `sim_t`. |

@@ -9,9 +9,10 @@
 #include <sys/stat.h>
 
 // for _getch used in Windows runtime.
-#ifdef WIN32
+#ifdef _WIN32
 #include <conio.h>
 #include "getopt.h"
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -70,6 +71,8 @@ static int parse_duration(const char *arg, int *iduration)
 		return -1;
 
 	*iduration = (int)(duration * 10.0 + 0.5);
+	if (*iduration < 1)
+		return -1;
 	return 0;
 }
 
@@ -341,6 +344,12 @@ void init_sim(sim_t *s)
 	s->tx.buffer = NULL;
 	memset(&s->tx.sample_stats, 0, sizeof(s->tx.sample_stats));
 	s->tx.padded_samples = 0U;
+	s->tx.submitted_samples = 0U;
+	s->tx.start_timestamp = 0U;
+	s->tx.end_timestamp = 0U;
+	s->tx.host_elapsed_seconds = 0.0;
+	s->tx.hardware_timeline_valid = 0;
+	s->tx.hardware_drain_complete = 0;
 	pthread_mutex_init(&(s->tx.lock), NULL);
 	s->tx.error = 0;
 
@@ -421,16 +430,74 @@ int is_fifo_write_ready(sim_t *s)
 	return(status);
 }
 
+static int monotonic_seconds(double *seconds)
+{
+	if (seconds == NULL)
+		return -1;
+#ifdef _WIN32
+	{
+		LARGE_INTEGER counter, frequency;
+		if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0 ||
+			!QueryPerformanceCounter(&counter))
+			return -1;
+		*seconds = (double)counter.QuadPart / (double)frequency.QuadPart;
+	}
+#else
+	{
+		struct timespec now;
+		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+			return -1;
+		*seconds = (double)now.tv_sec + (double)now.tv_nsec / 1.0e9;
+	}
+#endif
+	return 0;
+}
+
+static void sleep_one_millisecond(void)
+{
+#ifdef _WIN32
+	Sleep(1U);
+#else
+	struct timespec delay = {0, 1000000L};
+	(void)nanosleep(&delay, NULL);
+#endif
+}
+
+static int wait_for_tx_drain(sim_t *s, bladerf_timestamp target)
+{
+	double now, deadline;
+	if (s == NULL || s->tx.dev == NULL || s->opt.tx_sample_rate == 0U ||
+		monotonic_seconds(&now) != 0)
+		return -1;
+	deadline = now + 2.0 +
+		(double)(NUM_BUFFERS * SAMPLES_PER_BUFFER) / (double)s->opt.tx_sample_rate;
+	for (;;) {
+		bladerf_timestamp current;
+		int status = bladerf_get_timestamp(s->tx.dev, BLADERF_TX, &current);
+		if (status != 0)
+			return status;
+		if (current >= target)
+			return 0;
+		if (monotonic_seconds(&now) != 0 || now >= deadline)
+			return BLADERF_ERR_TIMEOUT;
+		sleep_one_millisecond();
+	}
+}
+
 void *tx_task(void *arg)
 {
 	sim_t *s = (sim_t *)arg;
 	size_t samples_populated;
 	int status;
+	int burst_started = 0;
+	double host_start = 0.0, host_end = 0.0;
 
 	while (1) {
 		int16_t *tx_buffer_current = s->tx.buffer;
 		unsigned int buffer_samples_remaining = SAMPLES_PER_BUFFER;
 		unsigned int samples_to_send;
+		int final_buffer = 0;
+		struct bladerf_metadata metadata;
 
 		while (buffer_samples_remaining > 0) {
 			
@@ -441,8 +508,7 @@ void *tx_task(void *arg)
 			}
 			if (get_sample_length(s) == 0 && is_finished_generation(s)) {
 				pthread_mutex_unlock(&(s->gps.lock));
-				if (buffer_samples_remaining == SAMPLES_PER_BUFFER)
-					goto out;
+				final_buffer = 1;
 				break;
 			}
 //			assert(get_sample_length(s) > 0);
@@ -470,10 +536,16 @@ void *tx_task(void *arg)
 			buffer_samples_remaining -= (unsigned int)samples_populated;
 			tx_buffer_current += (2 * samples_populated);
 		}
+		if (!final_buffer && buffer_samples_remaining == 0U) {
+			pthread_mutex_lock(&(s->gps.lock));
+			final_buffer = get_sample_length(s) == 0U && is_finished_generation(s);
+			pthread_mutex_unlock(&(s->gps.lock));
+		}
+		if (buffer_samples_remaining == SAMPLES_PER_BUFFER && !burst_started)
+			goto out;
 
-		/* The non-metadata synchronous interface may retain a partial transfer.
-		 * Zero-pad the final block so every generated sample is flushed to the
-		 * device; the padding is silence and is reported at shutdown. */
+		/* A timestamped burst-end flushes the final transfer. Keep full transport
+		 * buffers by zero-padding the tail; padding is silence and is reported. */
 		samples_to_send = SAMPLES_PER_BUFFER - buffer_samples_remaining;
 		blade_hw_measure_samples(s->tx.buffer, samples_to_send, &s->tx.sample_stats);
 		if (samples_to_send < SAMPLES_PER_BUFFER) {
@@ -481,10 +553,56 @@ void *tx_task(void *arg)
 				2U * (SAMPLES_PER_BUFFER - samples_to_send) * sizeof(*s->tx.buffer));
 			s->tx.padded_samples += SAMPLES_PER_BUFFER - samples_to_send;
 		}
-		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER, NULL, TIMEOUT_MS);
+		memset(&metadata, 0, sizeof(metadata));
+		if (!burst_started) {
+			bladerf_timestamp current;
+			status = bladerf_get_timestamp(s->tx.dev, BLADERF_TX, &current);
+			if (status != 0) {
+				fprintf(stderr, "Failed to read initial TX hardware timestamp: %s\n",
+					bladerf_strerror(status));
+				s->tx.error = status;
+				goto stop_producer;
+			}
+			s->tx.start_timestamp = current + s->opt.tx_sample_rate / 10U;
+			metadata.timestamp = s->tx.start_timestamp;
+			metadata.flags = BLADERF_META_FLAG_TX_BURST_START;
+			s->tx.hardware_timeline_valid = 1;
+			(void)monotonic_seconds(&host_start);
+		}
+		if (final_buffer)
+			metadata.flags |= BLADERF_META_FLAG_TX_BURST_END;
+		status = bladerf_sync_tx(s->tx.dev, s->tx.buffer, SAMPLES_PER_BUFFER,
+			&metadata, TIMEOUT_MS);
 		if (status != 0) {
 			fprintf(stderr, "TX stream failed: %s\n", bladerf_strerror(status));
 			s->tx.error = status;
+			goto stop_producer;
+		}
+		burst_started = 1;
+		s->tx.submitted_samples += SAMPLES_PER_BUFFER;
+		if (final_buffer) {
+			if (s->tx.start_timestamp > UINT64_MAX - s->tx.submitted_samples) {
+				fprintf(stderr, "TX hardware timestamp range overflow.\n");
+				s->tx.error = BLADERF_ERR_RANGE;
+				goto stop_producer;
+			}
+			s->tx.end_timestamp = s->tx.start_timestamp + s->tx.submitted_samples;
+			status = wait_for_tx_drain(s, s->tx.end_timestamp);
+			if (status != 0) {
+				fprintf(stderr, "TX hardware timeline did not drain: %s\n",
+					bladerf_strerror(status));
+				s->tx.error = status;
+				goto stop_producer;
+			}
+			s->tx.hardware_drain_complete = 1;
+			if (monotonic_seconds(&host_end) == 0 && host_start > 0.0)
+				s->tx.host_elapsed_seconds = host_end - host_start;
+			goto out;
+		}
+		continue;
+
+stop_producer:
+		{
 			pthread_mutex_lock(&(s->gps.lock));
 			s->finished = true;
 			pthread_cond_broadcast(&(s->fifo_write_ready));
@@ -492,8 +610,6 @@ void *tx_task(void *arg)
 			pthread_mutex_unlock(&(s->gps.lock));
 			goto out;
 		}
-		if (samples_to_send < SAMPLES_PER_BUFFER)
-			goto out;
 	}
 out:
 	return NULL;
@@ -902,7 +1018,7 @@ int main(int argc, char *argv[])
 	// Configure the TX module for use with the synchronous interface.
 	s.status = bladerf_sync_config(s.tx.dev,
 			BLADERF_TX_X1,
-			BLADERF_FORMAT_SC16_Q11,
+			BLADERF_FORMAT_SC16_Q11_META,
 			NUM_BUFFERS,
 			SAMPLES_PER_BUFFER,
 			NUM_TRANSFERS,
@@ -946,6 +1062,16 @@ int main(int argc, char *argv[])
 	if (s.tx.padded_samples != 0U)
 		printf("TX stream flush: %llu trailing zero samples\n",
 			(unsigned long long)s.tx.padded_samples);
+	if (s.tx.hardware_timeline_valid) {
+		double rf_seconds = (double)s.tx.submitted_samples /
+			(double)s.opt.tx_sample_rate;
+		printf("TX hardware timeline: %llu samples, %.6f seconds; drain %s",
+			(unsigned long long)s.tx.submitted_samples, rf_seconds,
+			s.tx.hardware_drain_complete ? "complete" : "incomplete");
+		if (s.tx.host_elapsed_seconds > 0.0)
+			printf("; host elapsed %.6f seconds", s.tx.host_elapsed_seconds);
+		printf("\n");
+	}
 	if (stop_was_requested())
 		printf("\nStopped by user.\n");
 	else if (s.tx.error == 0 && s.gps.error == 0)

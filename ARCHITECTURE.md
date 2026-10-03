@@ -66,7 +66,8 @@ bladegps.c main()
    +--> TX consumer thread: tx_task()
            |
            |-- read I/Q samples from FIFO
-           +-- stream SC16_Q11 buffers through bladerf_sync_tx()
+           |-- schedule one timestamped continuous SC16_Q11 burst
+           +-- wait for the FPGA clock to pass the final sample
 ```
 
 The FIFO decouples synthesis from hardware transmission. The producer generates `tx_sample_rate / 10` samples per 100 ms block, while the TX thread consumes `SAMPLES_PER_BUFFER` samples per libbladeRF transfer.
@@ -180,9 +181,14 @@ Main responsibilities:
 
 - Wait until FIFO data is available or generation is finished.
 - Copy enough samples into `tx.buffer`.
-- Call `bladerf_sync_tx()` with `SAMPLES_PER_BUFFER`.
+- Read the FPGA TX timestamp and schedule the first transfer 100 ms ahead so
+  producer, USB, and device queues are primed before RF starts.
+- Call `bladerf_sync_tx()` with `BLADERF_FORMAT_SC16_Q11_META` and one
+  continuous burst spanning every transfer.
 - Measure SC16 Q11 peaks and rail contact before each transfer.
-- Zero-pad and submit the final partial buffer as a complete synchronous transfer so the stream cannot retain the scenario tail.
+- Zero-pad and submit the final partial buffer with `TX_BURST_END`.
+- Wait until the free-running TX timestamp reaches the calculated final sample
+  before allowing `main()` to disable the module.
 - On TX error, set `tx.error`, set `finished`, broadcast FIFO condition variables, and exit.
 
 `main()` joins the TX thread first during normal completion, then disables TX
